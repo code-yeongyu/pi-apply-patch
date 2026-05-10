@@ -610,51 +610,6 @@ function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]):
 	return nextLines.join("\n");
 }
 
-async function applyParsedPatch(cwd: string, hunks: ParsedPatch[]): Promise<string[]> {
-	const summaries: string[] = [];
-
-	for (const hunk of hunks) {
-		const absolutePath = await resolveWorkspacePath(cwd, hunk.filePath);
-		if (hunk.type === "add") {
-			await mkdir(path.dirname(absolutePath), { recursive: true });
-			await assertWorkspacePath(cwd, absolutePath);
-			await writeFile(absolutePath, hunk.content, "utf-8");
-			summaries.push(`add: ${hunk.filePath}`);
-			continue;
-		}
-
-		if (hunk.type === "delete") {
-			await stat(absolutePath);
-			await assertWorkspacePath(cwd, absolutePath);
-			await rm(absolutePath);
-			summaries.push(`delete: ${hunk.filePath}`);
-			continue;
-		}
-
-		const currentContent = await readFile(absolutePath, "utf-8");
-		const nextContent =
-			hunk.chunks.length === 0 ? currentContent : replaceChunks(currentContent, hunk.filePath, hunk.chunks);
-
-		if (hunk.movePath) {
-			const absoluteMovePath = await resolveWorkspacePath(cwd, hunk.movePath);
-			await mkdir(path.dirname(absoluteMovePath), { recursive: true });
-			await assertWorkspacePath(cwd, absoluteMovePath);
-			await writeFile(absoluteMovePath, nextContent, "utf-8");
-			if (absoluteMovePath !== absolutePath) {
-				await rm(absolutePath);
-			}
-			summaries.push(`move: ${hunk.filePath} -> ${hunk.movePath}`);
-			continue;
-		}
-
-		await assertWorkspacePath(cwd, absolutePath);
-		await writeFile(absolutePath, nextContent, "utf-8");
-		summaries.push(`update: ${hunk.filePath}`);
-	}
-
-	return summaries;
-}
-
 async function applySingleHunk(
 	cwd: string,
 	hunk: ParsedPatch,
@@ -749,7 +704,31 @@ export async function applyPatch(cwd: string, patchText: string): Promise<string
 		throw new Error("apply_patch verification failed: no hunks found");
 	}
 
-	return applyParsedPatch(cwd, hunks);
+	const summaries: string[] = [];
+	const appliedFiles: string[] = [];
+	for (const hunk of hunks) {
+		try {
+			const { summary, appliedFile } = await applySingleHunk(cwd, hunk);
+			summaries.push(summary);
+			appliedFiles.push(appliedFile);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const result: ApplyPatchResult = {
+				summaries,
+				appliedFiles,
+				failures: [{ filePath: hunk.filePath, operation: hunk.type, message }],
+				hasPartialSuccess: appliedFiles.length > 0,
+				recoveryInstructions: createRecoveryInstructions({
+					appliedFiles,
+					failures: [{ filePath: hunk.filePath, operation: hunk.type, message }],
+				}),
+				details: { fuzz: 0 },
+			};
+			throw new ApplyPatchError(message, result);
+		}
+	}
+
+	return summaries;
 }
 
 async function createPendingPatchUpdate(
