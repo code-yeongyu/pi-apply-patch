@@ -678,12 +678,14 @@ export async function applyPatchDetailed(cwd: string, patchText: string): Promis
 	const summaries: string[] = [];
 	const appliedFiles: string[] = [];
 	const failures: ApplyPatchFailure[] = [];
+	let fuzz = 0;
 
 	for (const hunk of hunks) {
 		try {
-			const { summary, appliedFile } = await applySingleHunk(cwd, hunk);
+			const { summary, appliedFile, fuzz: hunkFuzz } = await applySingleHunk(cwd, hunk);
 			summaries.push(summary);
 			appliedFiles.push(appliedFile);
+			fuzz += hunkFuzz;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			failures.push({ filePath: hunk.filePath, operation: hunk.type, message });
@@ -696,7 +698,7 @@ export async function applyPatchDetailed(cwd: string, patchText: string): Promis
 		failures,
 		hasPartialSuccess: appliedFiles.length > 0 && failures.length > 0,
 		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
-		details: { fuzz: 0 },
+		details: { fuzz },
 	};
 	result.recoveryInstructions = createRecoveryInstructions(result);
 	return result;
