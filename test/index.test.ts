@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	__testWriteFileAtomic,
 	APPLY_PATCH_FREEFORM_DESCRIPTION,
 	APPLY_PATCH_LARK_GRAMMAR,
 	type ApplyPatchExtensionAPI,
@@ -515,6 +516,35 @@ EOF`;
 		expect(text).toContain(
 			"Recovery: MUST NOT reread other files from this patch unless a specific dependency requires it.",
 		);
+	});
+
+	it("#given eexist on rename #when writing atomically #then retries after unlink", async () => {
+		// given
+		const calls: string[] = [];
+		let renameCount = 0;
+		const operations = {
+			async writeFile() {
+				calls.push("writeFile");
+			},
+			async rename() {
+				renameCount += 1;
+				calls.push(`rename:${renameCount}`);
+				if (renameCount === 1) {
+					const error = new Error("exists") as Error & { code?: string };
+					error.code = "EEXIST";
+					throw error;
+				}
+			},
+			async unlink() {
+				calls.push("unlink");
+			},
+		};
+
+		// when
+		await __testWriteFileAtomic("/tmp/target.txt", "content", operations);
+
+		// then
+		expect(calls).toEqual(["writeFile", "rename:1", "unlink", "rename:2"]);
 	});
 
 	it("#given patch text #when extracting paths #then returns touched files", () => {
