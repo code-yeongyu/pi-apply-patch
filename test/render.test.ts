@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	displayPath,
+	formatInFlightCallText,
 	formatPatchPreview,
 	PATCH_PREVIEW_MAX_CHARS,
 	PATCH_PREVIEW_MAX_LINES,
@@ -106,5 +107,21 @@ describe("render helpers", () => {
 		// then
 		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
 		expect(rendered).toContain("+1 new");
+	});
+
+	it("#given parseable call text #when formatting in-flight label #then includes count and paths", () => {
+		// given
+		const patch = `*** Begin Patch
+*** Update File: src/a.ts
+*** Add File: src/b.ts
+*** End Patch`;
+
+		// when
+		const callText = formatInFlightCallText(patch);
+
+		// then
+		expect(callText).toContain("(2 files)");
+		expect(callText).toContain("src/a.ts");
+		expect(callText).toContain("src/b.ts");
 	});
 });
