@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	clearApplyPatchRenderState,
 	displayPath,
 	formatInFlightCallText,
 	formatPatchPreview,
@@ -107,6 +108,11 @@ describe("render helpers", () => {
 		// then
 		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
 		expect(rendered).toContain("+1 new");
+	});
+
+	it("#given cached state #when clearing #then reset helper is callable", () => {
+		// given/when/then
+		expect(() => clearApplyPatchRenderState()).not.toThrow();
 	});
 
 	it("#given parseable call text #when formatting in-flight label #then includes count and paths", () => {
