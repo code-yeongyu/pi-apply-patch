@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	clearApplyPatchRenderState,
+	createApplyPatchTool,
 	displayPath,
 	formatInFlightCallText,
 	formatPatchPreview,
@@ -8,6 +9,13 @@ import {
 	PATCH_PREVIEW_MAX_LINES,
 	truncatePreview,
 } from "../src/index.js";
+
+const identityTheme = {
+	fg: (_name: string, text: string) => text,
+	bg: (_name: string, text: string) => text,
+	bold: (text: string) => text,
+	inverse: (text: string) => text,
+};
 
 describe("render helpers", () => {
 	it("#given long diff #when truncating #then keeps head and tail", () => {
@@ -129,5 +137,51 @@ describe("render helpers", () => {
 		expect(callText).toContain("(2 files)");
 		expect(callText).toContain("src/a.ts");
 		expect(callText).toContain("src/b.ts");
+	});
+
+	it("#given partial args #when rendering call #then shows patching placeholder", () => {
+		// given
+		const tool = createApplyPatchTool();
+
+		// when
+		const component = tool.renderCall?.(
+			{ input: "{" },
+			identityTheme as never,
+			{
+				argsComplete: false,
+				cwd: "/workspace/project",
+				toolCallId: "call-1",
+			} as never,
+		);
+		const rendered = component?.render(120).join("\n") ?? "";
+
+		// then
+		expect(rendered).toContain("apply_patch: Patching");
+	});
+
+	it("#given patch args #when rendering call #then shows paths and count", () => {
+		// given
+		const tool = createApplyPatchTool();
+		const args = {
+			input: `*** Begin Patch
+*** Update File: src/a.ts
+*** Add File: src/b.ts
+*** End Patch`,
+		};
+
+		// when
+		const component = tool.renderCall?.(
+			args,
+			identityTheme as never,
+			{
+				argsComplete: true,
+				cwd: "/workspace/project",
+				toolCallId: "call-2",
+			} as never,
+		);
+		const rendered = component?.render(200).join("\n") ?? "";
+
+		// then
+		expect(rendered).toContain("apply_patch: Patching (2 files): src/a.ts, src/b.ts");
 	});
 });
