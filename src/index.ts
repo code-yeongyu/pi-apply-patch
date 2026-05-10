@@ -379,6 +379,23 @@ function formatLineCountSummary(added: number, removed: number): string {
 	return `(+${added} -${removed})`;
 }
 
+export function displayPath(filePath: string, cwd: string): string {
+	if (!path.isAbsolute(filePath)) {
+		return filePath;
+	}
+
+	const absoluteCwd = path.resolve(cwd);
+	const relativePath = path.relative(absoluteCwd, filePath);
+	if (
+		relativePath === "" ||
+		(!relativePath.startsWith(`..${path.sep}`) && relativePath !== ".." && !path.isAbsolute(relativePath))
+	) {
+		return relativePath || ".";
+	}
+
+	return filePath;
+}
+
 function formatPatchFilePath(file: ApplyPatchPreviewFile): string {
 	return file.movePath ? `${file.filePath} → ${file.movePath}` : file.filePath;
 }
