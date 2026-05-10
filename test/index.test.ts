@@ -6,6 +6,7 @@ import {
 	APPLY_PATCH_LARK_GRAMMAR,
 	type ApplyPatchExtensionAPI,
 	applyPatch,
+	applyPatchDetailed,
 	createApplyPatchTool,
 	extractPatchedPaths,
 	type FreeformToolFormat,
@@ -410,6 +411,31 @@ EOF`;
 
 		// when / then
 		await expect(applyPatch(directory, patch)).rejects.toThrow("Failed to find expected lines in modify.txt");
+	});
+
+	it("#given partial patch failure #when applying detailed #then accumulates applied and failed files", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "ok.txt"), "before\n", "utf-8");
+		await writeFile(path.join(directory, "broken.txt"), "line\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: ok.txt
+@@
+-before
++after
+*** Update File: broken.txt
+@@
+-missing
++changed
+*** End Patch`;
+
+		// when
+		const result = await applyPatchDetailed(directory, patch);
+
+		// then
+		expect(result.appliedFiles).toEqual(["ok.txt"]);
+		expect(result.failures).toHaveLength(1);
+		expect(result.failures[0]?.filePath).toBe("broken.txt");
 	});
 
 	it("#given patch text #when extracting paths #then returns touched files", () => {
