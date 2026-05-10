@@ -719,7 +719,7 @@ export async function applyPatchDetailed(cwd: string, patchText: string): Promis
 		}
 	}
 
-	return {
+	const result: ApplyPatchResult = {
 		summaries,
 		appliedFiles,
 		failures,
@@ -727,6 +727,16 @@ export async function applyPatchDetailed(cwd: string, patchText: string): Promis
 		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
 		details: { fuzz: 0 },
 	};
+	result.recoveryInstructions = createRecoveryInstructions(result);
+	return result;
+}
+
+function createRecoveryInstructions(
+	result: Pick<ApplyPatchResult, "appliedFiles" | "failures">,
+): ApplyPatchRecoveryInstructions {
+	const mustReadFiles = [...new Set(result.failures.map((failure) => failure.filePath))];
+	const mustNotReadFiles = [...new Set(result.appliedFiles.filter((filePath) => !mustReadFiles.includes(filePath)))];
+	return { mustReadFiles, mustNotReadFiles };
 }
 
 export async function applyPatch(cwd: string, patchText: string): Promise<string[]> {
