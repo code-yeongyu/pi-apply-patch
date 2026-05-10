@@ -461,6 +461,39 @@ export function formatPatchPreview(
 	return lines.join("\n");
 }
 
+function getApplyPatchRenderState(toolCallId: string, cwd: string, patchText: string): ApplyPatchRenderState {
+	const existing = applyPatchRenderStates.get(toolCallId);
+	if (existing && existing.cwd === cwd && existing.patchText === patchText) {
+		return existing;
+	}
+
+	const callText = formatInFlightCallText(patchText);
+	let collapsed = "";
+	let expanded = "";
+	try {
+		const hunks = parsePatch(patchText);
+		if (hunks.length > 0) {
+			const files = hunks.map((hunk) => ({
+				filePath: hunk.filePath,
+				movePath: hunk.type === "update" ? hunk.movePath : undefined,
+				operation: hunk.type,
+				diff: "",
+				added: 0,
+				removed: 0,
+			})) satisfies ApplyPatchPreviewFile[];
+			const preview: ApplyPatchPreview = { files, added: 0, removed: 0 };
+			collapsed = formatPatchPreview(preview, cwd, false);
+			expanded = formatPatchPreview(preview, cwd, true);
+		}
+	} catch {
+		// leave summaries empty for partial/incomplete patch text
+	}
+
+	const nextState: ApplyPatchRenderState = { cwd, patchText, callText, collapsed, expanded };
+	applyPatchRenderStates.set(toolCallId, nextState);
+	return nextState;
+}
+
 export function clearApplyPatchRenderState(): void {
 	applyPatchRenderStates.clear();
 }
@@ -1054,8 +1087,15 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				details: { result },
 			};
 		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("apply_patch")), 0, 0);
+		renderCall(args, theme, context) {
+			if (!context.argsComplete) {
+				return new Text(theme.fg("toolTitle", theme.bold("apply_patch: Patching")), 0, 0);
+			}
+
+			const normalizedArgs = normalizeApplyPatchArguments(args);
+			const renderState = getApplyPatchRenderState(context.toolCallId, context.cwd, normalizedArgs.input);
+			const text = renderState.callText.length > 0 ? `apply_patch: ${renderState.callText}` : "apply_patch";
+			return new Text(theme.fg("toolTitle", theme.bold(text)), 0, 0);
 		},
 		renderResult(result, options, theme) {
 			const component = new Container();
