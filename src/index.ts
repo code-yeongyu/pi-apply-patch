@@ -452,6 +452,16 @@ export function formatPatchPreview(
 	return lines.join("\n");
 }
 
+export function formatInFlightCallText(patchText: string): string {
+	const paths = extractPatchedPaths(patchText);
+	if (paths.length === 0) {
+		return "Patching";
+	}
+	const noun = paths.length === 1 ? "file" : "files";
+	const count = paths.length > 1 ? ` (${paths.length} ${noun})` : "";
+	return `Patching${count}: ${paths.join(", ")}`;
+}
+
 function renderPatchPreview(preview: ApplyPatchPreview, theme: ApplyPatchTheme): string {
 	return formatPatchPreview(preview)
 		.split("\n")
