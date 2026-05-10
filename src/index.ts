@@ -655,6 +655,80 @@ async function applyParsedPatch(cwd: string, hunks: ParsedPatch[]): Promise<stri
 	return summaries;
 }
 
+async function applySingleHunk(
+	cwd: string,
+	hunk: ParsedPatch,
+): Promise<{ summary: string; appliedFile: string; fuzz: number }> {
+	const absolutePath = await resolveWorkspacePath(cwd, hunk.filePath);
+	if (hunk.type === "add") {
+		await mkdir(path.dirname(absolutePath), { recursive: true });
+		await assertWorkspacePath(cwd, absolutePath);
+		await writeFile(absolutePath, hunk.content, "utf-8");
+		return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+	}
+
+	if (hunk.type === "delete") {
+		await stat(absolutePath);
+		await assertWorkspacePath(cwd, absolutePath);
+		await rm(absolutePath);
+		return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+	}
+
+	const currentContent = await readFile(absolutePath, "utf-8");
+	const nextContent =
+		hunk.chunks.length === 0 ? currentContent : replaceChunks(currentContent, hunk.filePath, hunk.chunks);
+
+	if (hunk.movePath) {
+		const absoluteMovePath = await resolveWorkspacePath(cwd, hunk.movePath);
+		await mkdir(path.dirname(absoluteMovePath), { recursive: true });
+		await assertWorkspacePath(cwd, absoluteMovePath);
+		await writeFile(absoluteMovePath, nextContent, "utf-8");
+		if (absoluteMovePath !== absolutePath) {
+			await rm(absolutePath);
+		}
+		return { summary: `move: ${hunk.filePath} -> ${hunk.movePath}`, appliedFile: hunk.movePath, fuzz: 0 };
+	}
+
+	await assertWorkspacePath(cwd, absolutePath);
+	await writeFile(absolutePath, nextContent, "utf-8");
+	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+}
+
+export async function applyPatchDetailed(cwd: string, patchText: string): Promise<ApplyPatchResult> {
+	const hunks = parsePatch(patchText);
+	if (hunks.length === 0) {
+		const normalized = normalizePatchText(patchText).trim();
+		if (normalized === "*** Begin Patch\n*** End Patch") {
+			throw new Error("patch rejected: empty patch");
+		}
+		throw new Error("apply_patch verification failed: no hunks found");
+	}
+
+	const summaries: string[] = [];
+	const appliedFiles: string[] = [];
+	const failures: ApplyPatchFailure[] = [];
+
+	for (const hunk of hunks) {
+		try {
+			const { summary, appliedFile } = await applySingleHunk(cwd, hunk);
+			summaries.push(summary);
+			appliedFiles.push(appliedFile);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			failures.push({ filePath: hunk.filePath, operation: hunk.type, message });
+		}
+	}
+
+	return {
+		summaries,
+		appliedFiles,
+		failures,
+		hasPartialSuccess: appliedFiles.length > 0 && failures.length > 0,
+		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
+		details: { fuzz: 0 },
+	};
+}
+
 export async function applyPatch(cwd: string, patchText: string): Promise<string[]> {
 	const hunks = parsePatch(patchText);
 	if (hunks.length === 0) {
