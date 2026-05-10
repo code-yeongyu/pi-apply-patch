@@ -107,6 +107,14 @@ export class ApplyPatchError extends Error {
 	}
 }
 
+type ApplyPatchRenderState = {
+	cwd: string;
+	patchText: string;
+	callText: string;
+	collapsed: string;
+	expanded: string;
+};
+
 type ApplyPatchThemeColor =
 	| "accent"
 	| "error"
@@ -171,6 +179,7 @@ export const PATCH_PREVIEW_MAX_LINES = 16;
 export const PATCH_PREVIEW_MAX_CHARS = 4000;
 const PATCH_PREVIEW_HEAD_LINES = 8;
 const PATCH_PREVIEW_TAIL_LINES = 8;
+const applyPatchRenderStates = new Map<string, ApplyPatchRenderState>();
 
 function countLines(text: string): number {
 	if (text.length === 0) {
@@ -450,6 +459,10 @@ export function formatPatchPreview(
 		}
 	}
 	return lines.join("\n");
+}
+
+export function clearApplyPatchRenderState(): void {
+	applyPatchRenderStates.clear();
 }
 
 export function formatInFlightCallText(patchText: string): string {
