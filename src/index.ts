@@ -508,8 +508,13 @@ export function formatInFlightCallText(patchText: string): string {
 	return `Patching${count}: ${paths.join(", ")}`;
 }
 
-function renderPatchPreview(preview: ApplyPatchPreview, theme: ApplyPatchTheme): string {
-	return formatPatchPreview(preview)
+function renderPatchPreview(
+	preview: ApplyPatchPreview,
+	cwd: string,
+	theme: ApplyPatchTheme,
+	expanded: boolean,
+): string {
+	return formatPatchPreview(preview, cwd, expanded)
 		.split("\n")
 		.map((line) => {
 			const trimmed = line.trimStart();
@@ -1097,7 +1102,7 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 			const text = renderState.callText.length > 0 ? `apply_patch: ${renderState.callText}` : "apply_patch";
 			return new Text(theme.fg("toolTitle", theme.bold(text)), 0, 0);
 		},
-		renderResult(result, options, theme) {
+		renderResult(result, options, theme, context) {
 			const component = new Container();
 			const preview = result.details?.preview;
 			if (preview) {
@@ -1105,7 +1110,8 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				const box = new Box(1, 1, (text: string) => theme.bg(bgName, text));
 				box.addChild(new Text(theme.fg("toolTitle", theme.bold("Applying patch")), 0, 0));
 				box.addChild(new Spacer(1));
-				box.addChild(new Text(renderPatchPreview(preview, theme), 0, 0));
+				const expanded = options.isPartial ? true : (options.expanded ?? true);
+				box.addChild(new Text(renderPatchPreview(preview, context.cwd, theme, expanded), 0, 0));
 				component.addChild(box);
 				return component;
 			}
