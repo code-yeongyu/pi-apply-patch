@@ -669,7 +669,7 @@ async function applySingleHunk(
 	if (hunk.type === "add") {
 		await mkdir(path.dirname(absolutePath), { recursive: true });
 		await assertWorkspacePath(cwd, absolutePath);
-		await writeFile(absolutePath, hunk.content, "utf-8");
+		await writeFileAtomic(absolutePath, hunk.content);
 		return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
 	}
 
@@ -691,7 +691,7 @@ async function applySingleHunk(
 		const absoluteMovePath = await resolveWorkspacePath(cwd, hunk.movePath);
 		await mkdir(path.dirname(absoluteMovePath), { recursive: true });
 		await assertWorkspacePath(cwd, absoluteMovePath);
-		await writeFile(absoluteMovePath, nextContent, "utf-8");
+		await writeFileAtomic(absoluteMovePath, nextContent);
 		if (absoluteMovePath !== absolutePath) {
 			await rm(absolutePath);
 		}
@@ -703,7 +703,7 @@ async function applySingleHunk(
 	}
 
 	await assertWorkspacePath(cwd, absolutePath);
-	await writeFile(absolutePath, nextContent, "utf-8");
+	await writeFileAtomic(absolutePath, nextContent);
 	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz };
 }
 
