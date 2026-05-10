@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PATCH_PREVIEW_MAX_CHARS, PATCH_PREVIEW_MAX_LINES, truncatePreview } from "../src/index.js";
+import { displayPath, PATCH_PREVIEW_MAX_CHARS, PATCH_PREVIEW_MAX_LINES, truncatePreview } from "../src/index.js";
 
 describe("render helpers", () => {
 	it("#given long diff #when truncating #then keeps head and tail", () => {
@@ -26,5 +26,29 @@ describe("render helpers", () => {
 		// then
 		expect(preview.length).toBeLessThanOrEqual(PATCH_PREVIEW_MAX_CHARS + 2);
 		expect(preview).toContain("…");
+	});
+
+	it("#given absolute path under cwd #when displaying #then returns relative path", () => {
+		// given
+		const cwd = "/workspace/project";
+		const absolute = "/workspace/project/src/index.ts";
+
+		// when
+		const rendered = displayPath(absolute, cwd);
+
+		// then
+		expect(rendered).toBe("src/index.ts");
+	});
+
+	it("#given absolute path outside cwd #when displaying #then keeps absolute path", () => {
+		// given
+		const cwd = "/workspace/project";
+		const absolute = "/tmp/file.ts";
+
+		// when
+		const rendered = displayPath(absolute, cwd);
+
+		// then
+		expect(rendered).toBe(absolute);
 	});
 });
