@@ -436,6 +436,29 @@ EOF`;
 		expect(result.appliedFiles).toEqual(["ok.txt"]);
 		expect(result.failures).toHaveLength(1);
 		expect(result.failures[0]?.filePath).toBe("broken.txt");
+		expect(result.recoveryInstructions.mustReadFiles).toEqual(["broken.txt"]);
+		expect(result.recoveryInstructions.mustNotReadFiles).toEqual(["ok.txt"]);
+	});
+
+	it("#given partial patch failure #when applying compat api #then fails fast after first error", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "broken.txt"), "line\n", "utf-8");
+		await writeFile(path.join(directory, "later.txt"), "before\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: broken.txt
+@@
+-missing
++changed
+*** Update File: later.txt
+@@
+-before
++after
+*** End Patch`;
+
+		// when / then
+		await expect(applyPatch(directory, patch)).rejects.toThrow("Failed to find expected lines in broken.txt");
+		expect(await readFile(path.join(directory, "later.txt"), "utf-8")).toBe("before\n");
 	});
 
 	it("#given patch text #when extracting paths #then returns touched files", () => {
