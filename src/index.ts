@@ -895,10 +895,36 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				details: pendingUpdate.details,
 			});
 
-			const summaries = await applyPatch(ctx.cwd, normalizedParams.input);
+			const result = await applyPatchDetailed(ctx.cwd, normalizedParams.input);
+			if (result.failures.length > 0) {
+				const failed = result.recoveryInstructions.mustReadFiles.join(", ");
+				const mustReadText = failed.includes(",") ? failed.split(", ").join(" and ") : failed;
+				return {
+					content: [
+						{
+							type: "text",
+							text: [
+								"apply_patch partially failed.",
+								`Failed: ${failed}`,
+								`Recovery: MUST read ${mustReadText} before retrying.`,
+								result.appliedFiles.length > 0
+									? "Earlier file actions in this patch were already applied."
+									: "No file actions were applied.",
+								result.recoveryInstructions.mustNotReadFiles.length > 0
+									? "Recovery: MUST NOT reread other files from this patch unless a specific dependency requires it."
+									: "",
+							]
+								.filter((line) => line.length > 0)
+								.join("\n"),
+						},
+					],
+					details: { result },
+				};
+			}
+
 			return {
-				content: [{ type: "text", text: summaries.join("\n") }],
-				details: {},
+				content: [{ type: "text", text: result.summaries.join("\n") }],
+				details: { result },
 			};
 		},
 		renderCall(_args, theme) {
