@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -516,6 +516,26 @@ EOF`;
 		expect(text).toContain(
 			"Recovery: MUST NOT reread other files from this patch unless a specific dependency requires it.",
 		);
+	});
+
+	it("#given successful patch write #when applying patch #then atomic temp files are cleaned", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "atomic.txt"), "before\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: atomic.txt
+@@
+-before
++after
+*** End Patch`;
+
+		// when
+		await applyPatch(directory, patch);
+
+		// then
+		expect(await readFile(path.join(directory, "atomic.txt"), "utf-8")).toBe("after\n");
+		const files = await readdir(directory);
+		expect(files.some((name) => name.includes(".tmp."))).toBe(false);
 	});
 
 	it("#given eexist on rename #when writing atomically #then retries after unlink", async () => {
