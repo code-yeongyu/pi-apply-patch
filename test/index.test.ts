@@ -485,6 +485,38 @@ EOF`;
 		expect(result.details.fuzz).toBe(10001);
 	});
 
+	it("#given apply patch tool partial failure #when executed #then returns recovery instructions text", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "ok.txt"), "before\n", "utf-8");
+		await writeFile(path.join(directory, "broken.txt"), "line\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: ok.txt
+@@
+-before
++after
+*** Update File: broken.txt
+@@
+-missing
++changed
+*** End Patch`;
+
+		// when
+		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
+			cwd: directory,
+		} as never);
+
+		// then
+		const text = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(text).toContain("apply_patch partially failed.");
+		expect(text).toContain("Failed: broken.txt");
+		expect(text).toContain("Recovery: MUST read broken.txt before retrying.");
+		expect(text).toContain("Earlier file actions in this patch were already applied.");
+		expect(text).toContain(
+			"Recovery: MUST NOT reread other files from this patch unless a specific dependency requires it.",
+		);
+	});
+
 	it("#given patch text #when extracting paths #then returns touched files", () => {
 		// given
 		const patch = `*** Begin Patch
