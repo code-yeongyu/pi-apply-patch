@@ -396,8 +396,12 @@ export function displayPath(filePath: string, cwd: string): string {
 	return filePath;
 }
 
-function formatPatchFilePath(file: ApplyPatchPreviewFile): string {
-	return file.movePath ? `${file.filePath} → ${file.movePath}` : file.filePath;
+export function formatPatchFilePath(file: ApplyPatchPreviewFile, cwd: string = process.cwd()): string {
+	const filePath = displayPath(file.filePath, cwd);
+	if (!file.movePath) {
+		return filePath;
+	}
+	return `${filePath} → ${displayPath(file.movePath, cwd)}`;
 }
 
 function formatPatchOperation(operation: ApplyPatchOperation): string {
