@@ -193,9 +193,14 @@ function normalizeSeekLine(line: string): string {
 		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
 }
 
-function seekSequence(lines: string[], pattern: string[], start: number, eof: boolean): number | undefined {
+function seekSequence(
+	lines: string[],
+	pattern: string[],
+	start: number,
+	eof: boolean,
+): { index: number; fuzz: 0 | 1 | 100 | 10000 } | undefined {
 	if (pattern.length === 0) {
-		return start;
+		return { index: start, fuzz: 0 };
 	}
 	if (pattern.length > lines.length) {
 		return undefined;
@@ -216,22 +221,22 @@ function seekSequence(lines: string[], pattern: string[], start: number, eof: bo
 
 	for (let index = searchStart; index <= lastStart; index++) {
 		if (matches(index, (line, expected) => line === expected)) {
-			return index;
+			return { index, fuzz: 0 };
 		}
 	}
 	for (let index = searchStart; index <= lastStart; index++) {
 		if (matches(index, (line, expected) => line.trimEnd() === expected.trimEnd())) {
-			return index;
+			return { index, fuzz: 1 };
 		}
 	}
 	for (let index = searchStart; index <= lastStart; index++) {
 		if (matches(index, (line, expected) => line.trim() === expected.trim())) {
-			return index;
+			return { index, fuzz: 100 };
 		}
 	}
 	for (let index = searchStart; index <= lastStart; index++) {
 		if (matches(index, (line, expected) => normalizeSeekLine(line) === normalizeSeekLine(expected))) {
-			return index;
+			return { index, fuzz: 10000 };
 		}
 	}
 
@@ -389,7 +394,8 @@ async function createPatchPreview(cwd: string, hunks: ParsedPatch[]): Promise<Ap
 		}
 
 		const oldContent = await readFile(absolutePath, "utf-8");
-		const newContent = hunk.chunks.length === 0 ? oldContent : replaceChunks(oldContent, hunk.filePath, hunk.chunks);
+		const newContent =
+			hunk.chunks.length === 0 ? oldContent : replaceChunks(oldContent, hunk.filePath, hunk.chunks).content;
 		if (hunk.movePath) {
 			await resolveWorkspacePath(cwd, hunk.movePath);
 		}
@@ -562,18 +568,20 @@ function splitFileLines(content: string): string[] {
 	return lines;
 }
 
-function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): string {
+function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
 	const originalLines = splitFileLines(content);
 	const replacements: { start: number; oldLength: number; newLines: string[] }[] = [];
 	let lineIndex = 0;
+	let fuzz = 0;
 
 	for (const chunk of chunks) {
 		for (const changeContext of chunk.changeContexts) {
-			const contextIndex = seekSequence(originalLines, [changeContext], lineIndex, false);
-			if (contextIndex === undefined) {
+			const contextMatch = seekSequence(originalLines, [changeContext], lineIndex, false);
+			if (contextMatch === undefined) {
 				throw new Error(`Failed to find context '${changeContext}' in ${filePath}`);
 			}
-			lineIndex = contextIndex + 1;
+			fuzz += contextMatch.fuzz;
+			lineIndex = contextMatch.index + 1;
 		}
 
 		if (chunk.oldLines.length === 0) {
@@ -598,8 +606,9 @@ function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]):
 			throw new Error(`Failed to find expected lines in ${filePath}:\n${chunk.oldLines.join("\n")}`);
 		}
 
-		replacements.push({ start: foundAt, oldLength: pattern.length, newLines });
-		lineIndex = foundAt + pattern.length;
+		fuzz += foundAt.fuzz;
+		replacements.push({ start: foundAt.index, oldLength: pattern.length, newLines });
+		lineIndex = foundAt.index + pattern.length;
 	}
 
 	const nextLines = [...originalLines];
@@ -607,7 +616,7 @@ function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]):
 		nextLines.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
 	}
 	nextLines.push("");
-	return nextLines.join("\n");
+	return { content: nextLines.join("\n"), fuzz };
 }
 
 async function applySingleHunk(
@@ -630,8 +639,11 @@ async function applySingleHunk(
 	}
 
 	const currentContent = await readFile(absolutePath, "utf-8");
-	const nextContent =
-		hunk.chunks.length === 0 ? currentContent : replaceChunks(currentContent, hunk.filePath, hunk.chunks);
+	const chunkResult =
+		hunk.chunks.length === 0
+			? { content: currentContent, fuzz: 0 }
+			: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
+	const nextContent = chunkResult.content;
 
 	if (hunk.movePath) {
 		const absoluteMovePath = await resolveWorkspacePath(cwd, hunk.movePath);
@@ -641,12 +653,16 @@ async function applySingleHunk(
 		if (absoluteMovePath !== absolutePath) {
 			await rm(absolutePath);
 		}
-		return { summary: `move: ${hunk.filePath} -> ${hunk.movePath}`, appliedFile: hunk.movePath, fuzz: 0 };
+		return {
+			summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
+			appliedFile: hunk.movePath,
+			fuzz: chunkResult.fuzz,
+		};
 	}
 
 	await assertWorkspacePath(cwd, absolutePath);
 	await writeFile(absolutePath, nextContent, "utf-8");
-	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz };
 }
 
 export async function applyPatchDetailed(cwd: string, patchText: string): Promise<ApplyPatchResult> {
