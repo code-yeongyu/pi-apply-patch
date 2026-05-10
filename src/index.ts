@@ -414,16 +414,24 @@ function formatPatchOperation(operation: ApplyPatchOperation): string {
 	return "Edited";
 }
 
-function formatPatchPreview(preview: ApplyPatchPreview): string {
+export function formatPatchPreview(
+	preview: ApplyPatchPreview,
+	cwd: string = process.cwd(),
+	expanded: boolean = true,
+): string {
 	const lines: string[] = [];
 	if (preview.files.length === 1) {
 		const file = preview.files[0];
 		if (file) {
 			lines.push(
-				`• ${formatPatchOperation(file.operation)} ${formatPatchFilePath(file)} ${formatLineCountSummary(file.added, file.removed)}`,
+				`• ${formatPatchOperation(file.operation)} ${formatPatchFilePath(file, cwd)} ${formatLineCountSummary(file.added, file.removed)}`,
 			);
-			if (file.diff) {
-				lines.push(...file.diff.split("\n").map((line) => `  ${line}`));
+			if (expanded && file.diff) {
+				lines.push(
+					...truncatePreview(file.diff)
+						.split("\n")
+						.map((line) => `  ${line}`),
+				);
 			}
 		}
 		return lines.join("\n");
@@ -432,9 +440,13 @@ function formatPatchPreview(preview: ApplyPatchPreview): string {
 	const noun = preview.files.length === 1 ? "file" : "files";
 	lines.push(`• Edited ${preview.files.length} ${noun} ${formatLineCountSummary(preview.added, preview.removed)}`);
 	for (const file of preview.files) {
-		lines.push(`  └ ${formatPatchFilePath(file)} ${formatLineCountSummary(file.added, file.removed)}`);
-		if (file.diff) {
-			lines.push(...file.diff.split("\n").map((line) => `    ${line}`));
+		lines.push(`  └ ${formatPatchFilePath(file, cwd)} ${formatLineCountSummary(file.added, file.removed)}`);
+		if (expanded && file.diff) {
+			lines.push(
+				...truncatePreview(file.diff)
+					.split("\n")
+					.map((line) => `    ${line}`),
+			);
 		}
 	}
 	return lines.join("\n");
