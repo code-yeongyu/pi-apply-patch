@@ -461,6 +461,30 @@ EOF`;
 		expect(await readFile(path.join(directory, "later.txt"), "utf-8")).toBe("before\n");
 	});
 
+	it("#given fuzzy matches across hunks #when applying detailed #then aggregates fuzz score", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "trim-end.txt"), "keep trailing   \n", "utf-8");
+		await writeFile(path.join(directory, "normalize.txt"), "name = “old”\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: trim-end.txt
+@@
+-keep trailing
++keep trailing updated
+*** Update File: normalize.txt
+@@
+-name = "old"
++name = "new"
+*** End Patch`;
+
+		// when
+		const result = await applyPatchDetailed(directory, patch);
+
+		// then
+		expect(result.failures).toEqual([]);
+		expect(result.details.fuzz).toBe(10001);
+	});
+
 	it("#given patch text #when extracting paths #then returns touched files", () => {
 		// given
 		const patch = `*** Begin Patch
