@@ -184,4 +184,102 @@ describe("render helpers", () => {
 		// then
 		expect(rendered).toContain("apply_patch: Patching (2 files): src/a.ts, src/b.ts");
 	});
+
+	it("#given preview #when rendering result collapsed #then shows headers without diff lines", () => {
+		// given
+		const tool = createApplyPatchTool();
+		const result = {
+			content: [{ type: "text" as const, text: "Applying patch" }],
+			details: {
+				preview: {
+					files: [
+						{
+							filePath: "src/foo.ts",
+							operation: "update" as const,
+							diff: "-1 old\n+1 new",
+							added: 1,
+							removed: 1,
+						},
+					],
+					added: 1,
+					removed: 1,
+				},
+			},
+		};
+
+		// when
+		const component = tool.renderResult?.(
+			result,
+			{ expanded: false, isPartial: false },
+			identityTheme as never,
+			{ cwd: "/workspace/project", toolCallId: "result-1", args: { input: "" } } as never,
+		);
+		const rendered = component?.render(200).join("\n") ?? "";
+
+		// then
+		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
+		expect(rendered).not.toContain("+1 new");
+	});
+
+	it("#given multi-file preview #when rendering result collapsed #then shows grouped summary", () => {
+		// given
+		const tool = createApplyPatchTool();
+		const result = {
+			content: [{ type: "text" as const, text: "Applying patch" }],
+			details: {
+				preview: {
+					files: [
+						{ filePath: "src/a.ts", operation: "update" as const, diff: "+1 one", added: 1, removed: 0 },
+						{ filePath: "src/b.ts", operation: "update" as const, diff: "+1 two", added: 1, removed: 0 },
+					],
+					added: 2,
+					removed: 0,
+				},
+			},
+		};
+
+		// when
+		const component = tool.renderResult?.(
+			result,
+			{ expanded: false, isPartial: false },
+			identityTheme as never,
+			{ cwd: "/workspace/project", toolCallId: "result-3", args: { input: "" } } as never,
+		);
+		const rendered = component?.render(400).join("\n") ?? "";
+
+		// then
+		expect(rendered).toContain("• Edited 2 files (+2 -0)");
+		expect(rendered).toContain("└ src/a.ts (+1 -0)");
+		expect(rendered).toContain("└ src/b.ts (+1 -0)");
+		expect(rendered).not.toContain("+1 one");
+	});
+
+	it("#given large preview #when rendering result expanded #then shows truncation marker", () => {
+		// given
+		const tool = createApplyPatchTool();
+		const diff = Array.from({ length: 50 }, (_, index) => `+${index + 1} line`).join("\n");
+		const result = {
+			content: [{ type: "text" as const, text: "Applying patch" }],
+			details: {
+				preview: {
+					files: [{ filePath: "src/large.ts", operation: "update" as const, diff, added: 50, removed: 0 }],
+					added: 50,
+					removed: 0,
+				},
+			},
+		};
+
+		// when
+		const component = tool.renderResult?.(
+			result,
+			{ expanded: true, isPartial: false },
+			identityTheme as never,
+			{ cwd: "/workspace/project", toolCallId: "result-large", args: { input: "" } } as never,
+		);
+		const rendered = component?.render(400).join("\n") ?? "";
+
+		// then
+		expect(rendered).toContain("• Edited src/large.ts (+50 -0)");
+		expect(rendered).toContain("…");
+	});
 });
