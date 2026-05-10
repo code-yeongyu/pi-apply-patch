@@ -66,7 +66,46 @@ type ApplyPatchPreview = {
 
 type ApplyPatchToolDetails = {
 	preview?: ApplyPatchPreview;
+	result?: ApplyPatchResult;
 };
+
+export type ApplyPatchFailure = {
+	filePath: string;
+	operation: ApplyPatchOperation;
+	message: string;
+};
+
+export type ApplyPatchRecoveryInstructions = {
+	mustReadFiles: string[];
+	mustNotReadFiles: string[];
+};
+
+export type ApplyPatchResult = {
+	summaries: string[];
+	appliedFiles: string[];
+	failures: ApplyPatchFailure[];
+	hasPartialSuccess: boolean;
+	recoveryInstructions: ApplyPatchRecoveryInstructions;
+	details: {
+		fuzz: number;
+	};
+};
+
+export class ApplyPatchError extends Error {
+	public readonly failures: ApplyPatchFailure[];
+	public readonly result: ApplyPatchResult;
+
+	constructor(message: string, result: ApplyPatchResult) {
+		super(message);
+		this.name = "ApplyPatchError";
+		this.failures = result.failures;
+		this.result = result;
+	}
+
+	hasPartialSuccess(): boolean {
+		return this.result.hasPartialSuccess;
+	}
+}
 
 type ApplyPatchThemeColor =
 	| "accent"
