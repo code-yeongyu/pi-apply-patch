@@ -2,7 +2,7 @@ import { mkdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "
 import path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Model } from "@mariozechner/pi-ai";
-import { defineTool, type ExtensionAPI, type ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { defineTool, type ExtensionAPI, renderDiff, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Box, Container, Spacer, Text } from "@mariozechner/pi-tui";
 import * as Diff from "diff";
 import { Type } from "typebox";
@@ -514,6 +514,26 @@ function renderPatchPreview(
 	theme: ApplyPatchTheme,
 	expanded: boolean,
 ): string {
+	if (expanded) {
+		try {
+			const renderedFiles = preview.files
+				.map((file) => {
+					const header = `• ${formatPatchOperation(file.operation)} ${formatPatchFilePath(file, cwd)} ${formatLineCountSummary(file.added, file.removed)}`;
+					if (!file.diff) {
+						return header;
+					}
+					const previewDiff = truncatePreview(file.diff);
+					return `${header}\n${renderDiff(previewDiff)}`;
+				})
+				.join("\n");
+			if (renderedFiles.length > 0) {
+				return renderedFiles;
+			}
+		} catch {
+			// fall back to manual themed line rendering
+		}
+	}
+
 	return formatPatchPreview(preview, cwd, expanded)
 		.split("\n")
 		.map((line) => {
