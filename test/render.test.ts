@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { displayPath, PATCH_PREVIEW_MAX_CHARS, PATCH_PREVIEW_MAX_LINES, truncatePreview } from "../src/index.js";
+import {
+	displayPath,
+	formatPatchPreview,
+	PATCH_PREVIEW_MAX_CHARS,
+	PATCH_PREVIEW_MAX_LINES,
+	truncatePreview,
+} from "../src/index.js";
 
 describe("render helpers", () => {
 	it("#given long diff #when truncating #then keeps head and tail", () => {
@@ -50,5 +56,55 @@ describe("render helpers", () => {
 
 		// then
 		expect(rendered).toBe(absolute);
+	});
+
+	it("#given expanded false #when formatting preview #then renders headers only", () => {
+		// given
+		const preview = {
+			files: [
+				{
+					filePath: "/workspace/project/src/foo.ts",
+					operation: "update" as const,
+					diff: "-1 old\n+1 new",
+					added: 1,
+					removed: 1,
+				},
+			],
+			added: 1,
+			removed: 1,
+		};
+
+		// when
+		const collapsed = formatPatchPreview(preview, "/workspace/project", false);
+		const expanded = formatPatchPreview(preview, "/workspace/project", true);
+
+		// then
+		expect(collapsed).toContain("• Edited src/foo.ts (+1 -1)");
+		expect(collapsed).not.toContain("+1 new");
+		expect(expanded).toContain("+1 new");
+	});
+
+	it("#given omitted optional args #when formatting preview #then keeps backward compatible defaults", () => {
+		// given
+		const preview = {
+			files: [
+				{
+					filePath: "src/foo.ts",
+					operation: "update" as const,
+					diff: "-1 old\n+1 new",
+					added: 1,
+					removed: 1,
+				},
+			],
+			added: 1,
+			removed: 1,
+		};
+
+		// when
+		const rendered = formatPatchPreview(preview);
+
+		// then
+		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
+		expect(rendered).toContain("+1 new");
 	});
 });
