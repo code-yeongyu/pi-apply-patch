@@ -566,7 +566,7 @@ EOF`;
 		// given
 		const directory = await createTempDirectory();
 		const outsideDirectory = await createTempDirectory();
-		await symlink(outsideDirectory, path.join(directory, "link"), "dir");
+		await symlink(outsideDirectory, path.join(directory, "link"), process.platform === "win32" ? "junction" : "dir");
 		const patch = `*** Begin Patch
 *** Add File: link/outside.txt
 +outside
