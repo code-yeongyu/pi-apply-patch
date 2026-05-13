@@ -179,7 +179,7 @@ function hasErrorCode(error: unknown, code: string): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-const GPT_APPLY_PATCH_PROVIDERS = new Set(["openai", "azure-openai-responses", "github-copilot"]);
+const GPT_APPLY_PATCH_PROVIDERS = new Set(["openai", "openai-codex", "azure-openai-responses", "github-copilot"]);
 export const PATCH_PREVIEW_MAX_LINES = 16;
 export const PATCH_PREVIEW_MAX_CHARS = 4000;
 const PATCH_PREVIEW_HEAD_LINES = 8;

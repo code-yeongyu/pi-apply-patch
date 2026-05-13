@@ -788,6 +788,7 @@ EOF`;
 
 	it("#given model metadata #when checking GPT activation #then only OpenAI GPT models match", () => {
 		expect(isOpenAIGptModel({ provider: "openai", id: "gpt-5" })).toBe(true);
+		expect(isOpenAIGptModel({ provider: "openai-codex", id: "gpt-5.5" })).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai", id: "o1" })).toBe(false);
 		expect(isOpenAIGptModel({ provider: "anthropic", id: "gpt-5" })).toBe(false);
 	});
