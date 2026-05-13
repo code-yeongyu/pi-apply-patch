@@ -32,10 +32,6 @@ type PatchChunk = {
 	isEndOfFile: boolean;
 };
 
-type BaselineState = {
-	nonGptToolNames: string[];
-};
-
 export type FreeformToolFormat = {
 	type: "grammar";
 	syntax: "lark";
@@ -314,7 +310,7 @@ function normalizeApplyPatchArguments(args: unknown): ApplyPatchParams {
 	return { input: "" };
 }
 
-const EDIT_TOOL_NAMES = new Set(["write", "edit"]);
+const STANDARD_EDIT_TOOL_NAMES = ["edit", "write"] as const;
 export const APPLY_PATCH_FREEFORM_DESCRIPTION =
 	"Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.";
 export const APPLY_PATCH_LARK_GRAMMAR = `start: begin_patch hunk+ end_patch
@@ -1298,28 +1294,19 @@ async function createPendingPatchUpdate(
 	return { text: progress ? title : formatPendingPatchPaths(patchText), details: progress ? { progress } : undefined };
 }
 
-function hasEditTools(toolNames: string[]): boolean {
-	return toolNames.some((toolName) => EDIT_TOOL_NAMES.has(toolName));
-}
-
-function withoutApplyPatch(toolNames: string[]): string[] {
-	return toolNames.filter((toolName) => toolName !== "apply_patch");
+function withoutExtensionManagedEditTools(toolNames: string[]): string[] {
+	return toolNames.filter(
+		(toolName) =>
+			toolName !== "apply_patch" && !STANDARD_EDIT_TOOL_NAMES.some((editToolName) => editToolName === toolName),
+	);
 }
 
 function replaceEditToolsWithApplyPatch(toolNames: string[]): string[] {
-	const filteredToolNames = withoutApplyPatch(toolNames).filter((toolName) => !EDIT_TOOL_NAMES.has(toolName));
-	if (!hasEditTools(toolNames)) {
-		return filteredToolNames;
-	}
-	return [...filteredToolNames, "apply_patch"];
+	return [...withoutExtensionManagedEditTools(toolNames), "apply_patch"];
 }
 
-function restoreEditToolsFromBaseline(currentToolNames: string[], baselineToolNames: string[]): string[] {
-	const restoredToolNames = [
-		...withoutApplyPatch(currentToolNames),
-		...baselineToolNames.filter((toolName) => EDIT_TOOL_NAMES.has(toolName)),
-	];
-	return [...new Set(restoredToolNames)];
+function replaceApplyPatchWithEditTools(toolNames: string[]): string[] {
+	return [...withoutExtensionManagedEditTools(toolNames), ...STANDARD_EDIT_TOOL_NAMES];
 }
 
 function isPathWithinWorkspace(workspacePath: string, candidatePath: string): boolean {
@@ -1371,26 +1358,14 @@ async function resolvePatchPath(cwd: string, filePath: string): Promise<string> 
 function syncToolset(
 	pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
 	model: Model<string> | undefined,
-	state: BaselineState,
 ): void {
 	const currentToolNames = pi.getActiveTools();
 	if (isOpenAIGptModel(model)) {
-		if (hasEditTools(currentToolNames)) {
-			state.nonGptToolNames = withoutApplyPatch(currentToolNames);
-		}
 		pi.setActiveTools(replaceEditToolsWithApplyPatch(currentToolNames));
 		return;
 	}
 
-	if (state.nonGptToolNames.length > 0) {
-		const restoredToolNames = restoreEditToolsFromBaseline(currentToolNames, state.nonGptToolNames);
-		state.nonGptToolNames = restoredToolNames;
-		pi.setActiveTools(restoredToolNames);
-		return;
-	}
-
-	state.nonGptToolNames = withoutApplyPatch(currentToolNames);
-	pi.setActiveTools(state.nonGptToolNames);
+	pi.setActiveTools(replaceApplyPatchWithEditTools(currentToolNames));
 }
 
 export function createApplyPatchTool(): ApplyPatchToolDefinition {
@@ -1537,18 +1512,18 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 }
 
 export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI): void {
-	const state: BaselineState = {
-		nonGptToolNames: [],
-	};
-
 	pi.registerTool(createApplyPatchTool());
 
 	pi.on("session_start", async (_event, ctx) => {
-		syncToolset(pi, ctx.model, state);
+		syncToolset(pi, ctx.model);
 	});
 
 	pi.on("model_select", async (event) => {
-		syncToolset(pi, event.model, state);
+		syncToolset(pi, event.model);
+	});
+
+	pi.on("before_agent_start", async (_event, ctx) => {
+		syncToolset(pi, ctx.model);
 	});
 }
 

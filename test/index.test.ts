@@ -26,6 +26,63 @@ const identityTheme = {
 };
 type ApplyPatchTool = ReturnType<typeof createApplyPatchTool>;
 type ApplyPatchUpdate = Parameters<NonNullable<Parameters<ApplyPatchTool["execute"]>[3]>>[0];
+type ToolsetHandler = (
+	event: { model?: { provider: string; id: string } },
+	ctx: { model: { provider: string; id: string } | undefined },
+) => void | Promise<void>;
+
+function isToolsetHandler(value: unknown): value is ToolsetHandler {
+	return typeof value === "function";
+}
+
+function createToolsetTestApi(initialActiveTools: string[]): {
+	api: ApplyPatchExtensionAPI;
+	trigger: (eventName: string, model: { provider: string; id: string } | undefined) => Promise<void>;
+	setActiveTools: (toolNames: string[]) => void;
+	getActiveTools: () => string[];
+	getSetActiveToolsCalls: () => string[][];
+} {
+	let activeTools = [...initialActiveTools];
+	const setActiveToolsCalls: string[][] = [];
+	const handlers = new Map<string, ToolsetHandler[]>();
+	const api: ApplyPatchExtensionAPI = {
+		registerTool() {},
+		on(...args: unknown[]) {
+			const eventName = args[0];
+			const handler = args[1];
+			if (typeof eventName !== "string" || !isToolsetHandler(handler)) {
+				return;
+			}
+			handlers.set(eventName, [...(handlers.get(eventName) ?? []), handler]);
+		},
+		getActiveTools() {
+			return [...activeTools];
+		},
+		setActiveTools(toolNames: string[]) {
+			activeTools = [...toolNames];
+			setActiveToolsCalls.push([...toolNames]);
+		},
+	};
+
+	return {
+		api,
+		async trigger(eventName, model) {
+			const event = model !== undefined ? { model } : {};
+			for (const handler of handlers.get(eventName) ?? []) {
+				await handler(event, { model });
+			}
+		},
+		setActiveTools(toolNames) {
+			activeTools = [...toolNames];
+		},
+		getActiveTools() {
+			return [...activeTools];
+		},
+		getSetActiveToolsCalls() {
+			return setActiveToolsCalls.map((toolNames) => [...toolNames]);
+		},
+	};
+}
 
 async function createTempDirectory(): Promise<string> {
 	const directory = await mkdtemp(path.join(process.cwd(), "test-temp-"));
@@ -72,6 +129,70 @@ describe("pi-apply-patch", () => {
 			syntax: "lark",
 			definition: APPLY_PATCH_LARK_GRAMMAR,
 		});
+	});
+
+	it("#given GPT model after reload with apply_patch already active #when session starts #then keeps apply_patch active", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "bash", "apply_patch"]);
+		registerApplyPatchExtension(harness.api);
+
+		// when
+		await harness.trigger("session_start", { provider: "openai", id: "gpt-5" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "bash", "apply_patch"]);
+		expect(harness.getSetActiveToolsCalls()).toEqual([["read", "bash", "apply_patch"]]);
+	});
+
+	it("#given GPT model with stale edit tools #when session starts #then normalizes to apply_patch only", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "apply_patch", "edit", "write"]);
+		registerApplyPatchExtension(harness.api);
+
+		// when
+		await harness.trigger("session_start", { provider: "openai", id: "gpt-5" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "apply_patch"]);
+	});
+
+	it("#given non GPT model and no original edit tools #when session starts #then restores standard edit tools", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "apply_patch"]);
+		registerApplyPatchExtension(harness.api);
+
+		// when
+		await harness.trigger("session_start", { provider: "anthropic", id: "claude-sonnet-4" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "edit", "write"]);
+	});
+
+	it("#given external tool change in GPT mode #when agent starts #then reconciles before model request", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "edit", "write"]);
+		registerApplyPatchExtension(harness.api);
+		await harness.trigger("session_start", { provider: "openai", id: "gpt-5" });
+		harness.setActiveTools(["read", "write", "apply_patch", "edit"]);
+
+		// when
+		await harness.trigger("before_agent_start", { provider: "openai", id: "gpt-5" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "apply_patch"]);
+	});
+
+	it("#given GPT mode #when model switches to non GPT #then apply_patch is replaced with edit tools", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "edit", "write"]);
+		registerApplyPatchExtension(harness.api);
+		await harness.trigger("session_start", { provider: "openai", id: "gpt-5" });
+
+		// when
+		await harness.trigger("model_select", { provider: "anthropic", id: "claude-sonnet-4" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "edit", "write"]);
 	});
 
 	it("#given raw codex patch #when executed #then applies file update", async () => {
