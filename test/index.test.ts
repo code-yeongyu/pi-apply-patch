@@ -328,6 +328,39 @@ describe("pi-apply-patch", () => {
 		expect(rendered).not.toContain("Index:");
 	});
 
+	it("#given successful apply_patch tool execution #when rendered #then final result shows diff preview", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "sample.txt"), "before\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: sample.txt
+@@
+-before
++after
+*** End Patch`;
+		const tool = createApplyPatchTool();
+
+		// when
+		const result = await tool.execute("apply-patch-final-preview-test", { input: patch }, undefined, undefined, {
+			cwd: directory,
+		} as never);
+		const component = tool.renderResult?.(
+			result,
+			{ expanded: true, isPartial: false },
+			identityTheme as never,
+			{ cwd: directory, toolCallId: "apply-patch-final-preview-test", args: { input: patch } } as never,
+		);
+		const rendered = component?.render(120).join("\n") ?? "";
+
+		// then
+		expect(result.details?.preview).toBeDefined();
+		expect(rendered).toContain("Applied patch");
+		expect(rendered).toContain("• Edited sample.txt (+1 -1)");
+		expect(rendered).toContain("-1 before");
+		expect(rendered).toContain("+1 after");
+		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
+	});
+
 	it("#given nested cwd #when previewing absolute workspace path #then formats relative to cwd", async () => {
 		// given
 		const directory = await createTempDirectory();

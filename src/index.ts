@@ -1420,13 +1420,13 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 								.join("\n"),
 						},
 					],
-					details: { result },
+					details: preview ? { preview, result } : { result },
 				};
 			}
 
 			return {
 				content: [{ type: "text", text: result.summaries.join("\n") }],
-				details: { result },
+				details: preview ? { preview, result } : { result },
 			};
 		},
 		renderCall(args, theme, context) {
@@ -1443,11 +1443,19 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 			const component = new Container();
 			const preview = result.details?.preview;
 			if (preview) {
-				const bgName = options.isPartial ? "toolPendingBg" : "toolSuccessBg";
+				const bgName = options.isPartial
+					? "toolPendingBg"
+					: result.details?.result && result.details.result.failures.length > 0
+						? "toolErrorBg"
+						: "toolSuccessBg";
 				const progress = result.details?.progress;
 				const title = progress
 					? `Applying patch (${progress.applied + progress.failed}/${progress.total})`
-					: "Applying patch";
+					: options.isPartial
+						? "Applying patch"
+						: result.details?.result && result.details.result.failures.length > 0
+							? "Patch partially failed"
+							: "Applied patch";
 				const box = new Box(1, 1, (text: string) => applyLayeredBackground(theme, bgName, text));
 				box.addChild(new Text(theme.fg("toolTitle", theme.bold(title)), 0, 0));
 				box.addChild(new Spacer(1));
