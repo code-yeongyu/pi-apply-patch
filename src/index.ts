@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -1309,50 +1309,8 @@ function replaceApplyPatchWithEditTools(toolNames: string[]): string[] {
 	return [...withoutExtensionManagedEditTools(toolNames), ...STANDARD_EDIT_TOOL_NAMES];
 }
 
-function isPathWithinWorkspace(workspacePath: string, candidatePath: string): boolean {
-	const relativePath = path.relative(workspacePath, candidatePath);
-	return (
-		relativePath === "" ||
-		(!relativePath.startsWith(`..${path.sep}`) && relativePath !== ".." && !path.isAbsolute(relativePath))
-	);
-}
-
-async function findExistingAncestor(directoryPath: string, workspacePath: string): Promise<string> {
-	let currentPath = directoryPath;
-	while (isPathWithinWorkspace(workspacePath, currentPath)) {
-		try {
-			await stat(currentPath);
-			return currentPath;
-		} catch (error) {
-			if (!hasErrorCode(error, "ENOENT")) {
-				throw error;
-			}
-		}
-
-		const parentPath = path.dirname(currentPath);
-		if (parentPath === currentPath) {
-			break;
-		}
-		currentPath = parentPath;
-	}
-
-	throw new PatchApplicationError(`Patch path escapes workspace: ${directoryPath}`);
-}
-
-async function resolvePatchPath(cwd: string, filePath: string): Promise<string> {
-	const workspacePath = await realpath(cwd);
-	const absolutePath = path.resolve(workspacePath, filePath);
-	if (!isPathWithinWorkspace(workspacePath, absolutePath)) {
-		throw new PatchApplicationError(`Patch path escapes workspace: ${filePath}`);
-	}
-
-	const existingAncestor = await findExistingAncestor(path.dirname(absolutePath), workspacePath);
-	const realAncestor = await realpath(existingAncestor);
-	if (!isPathWithinWorkspace(workspacePath, realAncestor)) {
-		throw new PatchApplicationError(`Patch path escapes workspace: ${filePath}`);
-	}
-
-	return absolutePath;
+function resolvePatchPath(cwd: string, filePath: string): string {
+	return path.resolve(cwd, filePath);
 }
 
 function syncToolset(
