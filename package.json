@@ -45,11 +45,11 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.16",
-		"@types/node": "^25.9.1",
-		"@typescript/native-preview": "^7.0.0-dev.20260604.1",
+		"@biomejs/biome": "2.5.0",
+		"@types/node": "^25.9.3",
+		"@typescript/native-preview": "^7.0.0-dev.20260618.1",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.8"
+		"vitest": "^4.1.9"
 	},
 	"engines": {
 		"node": ">=22.0.0"
