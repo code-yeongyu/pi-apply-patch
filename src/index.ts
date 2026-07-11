@@ -8,6 +8,7 @@ import {
 	getLanguageFromPath,
 	highlightCode,
 	type ToolDefinition,
+	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import * as Diff from "diff";
@@ -1129,41 +1130,46 @@ async function applySingleHunk(
 	hunk: ParsedPatch,
 ): Promise<{ summary: string; appliedFile: string; fuzz: number }> {
 	const absolutePath = await resolvePatchPath(cwd, hunk.filePath);
-	if (hunk.type === "add") {
-		await mkdir(path.dirname(absolutePath), { recursive: true });
-		await writeFileAtomic(absolutePath, hunk.content);
-		return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
-	}
+	const absoluteMovePath =
+		hunk.type === "update" && hunk.movePath ? await resolvePatchPath(cwd, hunk.movePath) : undefined;
+	const mutationPaths = absoluteMovePath ? [absolutePath, absoluteMovePath] : [absolutePath];
 
-	if (hunk.type === "delete") {
-		await stat(absolutePath);
-		await rm(absolutePath);
-		return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
-	}
-
-	const currentContent = await readFile(absolutePath, "utf-8");
-	const chunkResult =
-		hunk.chunks.length === 0
-			? { content: currentContent, fuzz: 0 }
-			: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
-	const nextContent = chunkResult.content;
-
-	if (hunk.movePath) {
-		const absoluteMovePath = await resolvePatchPath(cwd, hunk.movePath);
-		await mkdir(path.dirname(absoluteMovePath), { recursive: true });
-		await writeFileAtomic(absoluteMovePath, nextContent);
-		if (absoluteMovePath !== absolutePath) {
-			await rm(absolutePath);
+	return withPatchFileMutationQueues(mutationPaths, async () => {
+		if (hunk.type === "add") {
+			await mkdir(path.dirname(absolutePath), { recursive: true });
+			await writeFileAtomic(absolutePath, hunk.content);
+			return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
 		}
-		return {
-			summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
-			appliedFile: hunk.movePath,
-			fuzz: chunkResult.fuzz,
-		};
-	}
 
-	await writeFileAtomic(absolutePath, nextContent);
-	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz };
+		if (hunk.type === "delete") {
+			await stat(absolutePath);
+			await rm(absolutePath);
+			return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+		}
+
+		const currentContent = await readFile(absolutePath, "utf-8");
+		const chunkResult =
+			hunk.chunks.length === 0
+				? { content: currentContent, fuzz: 0 }
+				: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
+		const nextContent = chunkResult.content;
+
+		if (hunk.movePath && absoluteMovePath) {
+			await mkdir(path.dirname(absoluteMovePath), { recursive: true });
+			await writeFileAtomic(absoluteMovePath, nextContent);
+			if (absoluteMovePath !== absolutePath) {
+				await rm(absolutePath);
+			}
+			return {
+				summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
+				appliedFile: hunk.movePath,
+				fuzz: chunkResult.fuzz,
+			};
+		}
+
+		await writeFileAtomic(absolutePath, nextContent);
+		return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz };
+	});
 }
 
 export async function applyPatchDetailed(
@@ -1355,6 +1361,32 @@ async function resolvePatchPath(cwd: string, filePath: string): Promise<string> 
 	return absolutePath;
 }
 
+async function canonicalMutationPath(filePath: string): Promise<string> {
+	try {
+		return await realpath(filePath);
+	} catch (error) {
+		if (hasErrorCode(error, "ENOENT")) {
+			return path.resolve(filePath);
+		}
+		throw error;
+	}
+}
+
+async function withPatchFileMutationQueues<T>(filePaths: string[], operation: () => Promise<T>): Promise<T> {
+	const canonicalPaths = await Promise.all(filePaths.map(canonicalMutationPath));
+	const sortedPaths = [...new Set(canonicalPaths)].sort((left, right) => left.localeCompare(right));
+
+	const runQueued = (index: number): Promise<T> => {
+		const filePath = sortedPaths[index];
+		if (filePath === undefined) {
+			return operation();
+		}
+		return withFileMutationQueue(filePath, () => runQueued(index + 1));
+	};
+
+	return runQueued(0);
+}
+
 function syncToolset(
 	pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
 	model: Model<string> | undefined,
@@ -1439,7 +1471,7 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 						{
 							type: "text",
 							text: [
-								"apply_patch partially failed.",
+								result.hasPartialSuccess ? "apply_patch partially failed." : "apply_patch failed.",
 								`Failed: ${failed}`,
 								`Recovery: MUST read ${mustReadText} before retrying.`,
 								result.appliedFiles.length > 0

@@ -841,6 +841,89 @@ EOF`;
 		);
 	});
 
+	it("#given apply patch tool complete failure #when executed #then does not report partial failure", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "broken.txt"), "line\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: broken.txt
+@@
+-missing
++changed
+*** End Patch`;
+
+		// when
+		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
+			cwd: directory,
+		} as never);
+
+		// then
+		const text = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(text).toContain("apply_patch failed.");
+		expect(text).not.toContain("partially failed");
+		expect(text).toContain("No file actions were applied.");
+	});
+
+	it("#given concurrent patches to different lines in one file #when applied #then preserves both updates", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "shared.txt"), "first\nsecond\n", "utf-8");
+		const firstPatch = `*** Begin Patch
+*** Update File: shared.txt
+@@
+-first
++FIRST
+*** End Patch`;
+		const secondPatch = `*** Begin Patch
+*** Update File: shared.txt
+@@
+-second
++SECOND
+*** End Patch`;
+
+		// when
+		await Promise.all([applyPatch(directory, firstPatch), applyPatch(directory, secondPatch)]);
+
+		// then
+		expect(await readFile(path.join(directory, "shared.txt"), "utf-8")).toBe("FIRST\nSECOND\n");
+	});
+
+	it("#given concurrent update and move of one file #when applied #then produces a serialized outcome", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "source.txt"), "first\nsecond\n", "utf-8");
+		const updatePatch = `*** Begin Patch
+*** Update File: source.txt
+@@
+-second
++SECOND
+*** End Patch`;
+		const movePatch = `*** Begin Patch
+*** Update File: source.txt
+*** Move to: destination.txt
+@@
+-first
++FIRST
+*** End Patch`;
+
+		// when
+		const [updateResult, moveResult] = await Promise.all([
+			applyPatchDetailed(directory, updatePatch),
+			applyPatchDetailed(directory, movePatch),
+		]);
+
+		// then
+		const failureCount = updateResult.failures.length + moveResult.failures.length;
+		expect(failureCount === 0 || failureCount === 1).toBe(true);
+		await expect(readFile(path.join(directory, "source.txt"), "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+		const destination = await readFile(path.join(directory, "destination.txt"), "utf-8");
+		if (failureCount === 0) {
+			expect(destination).toBe("FIRST\nSECOND\n");
+		} else {
+			expect(destination).toBe("FIRST\nsecond\n");
+		}
+	});
+
 	it("#given successful patch write #when applying patch #then atomic temp files are cleaned", async () => {
 		// given
 		const directory = await createTempDirectory();
