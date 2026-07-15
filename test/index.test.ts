@@ -15,8 +15,8 @@ import {
 	PatchParseError,
 	registerApplyPatchExtension,
 	truncatePreview,
-} from "../index.js";
-import { writeFileAtomic } from "../write-file-atomic.js";
+} from "../src/index.js";
+import { writeFileAtomic } from "../src/write-file-atomic.js";
 
 const tempDirectories: string[] = [];
 const identityTheme = {
