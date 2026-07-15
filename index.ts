@@ -1,10 +1,12 @@
 import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import {
 	defineTool,
 	type ExtensionAPI,
+	getAgentDir,
 	getLanguageFromPath,
 	highlightCode,
 	type ToolDefinition,
@@ -232,7 +234,29 @@ function hasErrorCode(error: unknown, code: string): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-const GPT_APPLY_PATCH_PROVIDERS = new Set(["openai", "openai-codex"]);
+const DEFAULT_GPT_APPLY_PATCH_PROVIDERS = ["openai", "openai-codex"] as const;
+export const APPLY_PATCH_LOCAL_CONFIG_PATH = path.join(getAgentDir(), "pi-apply-patch.json");
+
+type ApplyPatchLocalConfig = {
+	providers?: unknown;
+};
+
+function getGPTApplyPatchProviders(): Set<string> {
+	try {
+		const config = JSON.parse(readFileSync(APPLY_PATCH_LOCAL_CONFIG_PATH, "utf8")) as ApplyPatchLocalConfig;
+		if (Array.isArray(config.providers)) {
+			const providers = config.providers.filter(
+				(provider): provider is string => typeof provider === "string" && provider.length > 0,
+			);
+			if (providers.length > 0) {
+				return new Set(providers);
+			}
+		}
+	} catch {
+		// Missing or invalid local config falls back to standard providers.
+	}
+	return new Set(DEFAULT_GPT_APPLY_PATCH_PROVIDERS);
+}
 export const PATCH_PREVIEW_MAX_LINES = 16;
 export const PATCH_PREVIEW_MAX_CHARS = 4000;
 const PATCH_PREVIEW_HEAD_LINES = 8;
@@ -392,7 +416,7 @@ eof_line: "*** End of File" LF
 `;
 
 export function isOpenAIGptModel(model: Pick<Model<string>, "provider" | "id"> | undefined): boolean {
-	return model !== undefined && GPT_APPLY_PATCH_PROVIDERS.has(model.provider) && model.id.toLowerCase().startsWith("gpt-");
+	return model !== undefined && getGPTApplyPatchProviders().has(model.provider) && model.id.toLowerCase().startsWith("gpt-");
 }
 
 function normalizePatchText(patchText: string): string {

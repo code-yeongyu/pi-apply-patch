@@ -55,6 +55,18 @@ pi -e /path/to/pi-apply-patch/index.ts
 
 After installation, restart pi or run `/reload` inside an interactive session.
 
+### Private provider configuration
+
+The extension enables `openai` and `openai-codex` by default. To enable a private provider only on your machine, create `~/.pi/agent/pi-apply-patch.json`:
+
+```json
+{
+  "providers": ["openai", "openai-codex", "suda-mkt"]
+}
+```
+
+The file is optional and is never part of the package or repository. Missing or invalid configuration falls back to the standard providers. Only models whose IDs start with `gpt-` activate `apply_patch`.
+
 ## Development
 
 ```bash
