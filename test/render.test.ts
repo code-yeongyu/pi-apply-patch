@@ -8,7 +8,7 @@ import {
 	PATCH_PREVIEW_MAX_CHARS,
 	PATCH_PREVIEW_MAX_LINES,
 	truncatePreview,
-} from "../src/index.js";
+} from "../index.js";
 
 const identityTheme = {
 	fg: (_name: string, text: string) => text,

@@ -50,7 +50,7 @@ git clone https://github.com/code-yeongyu/pi-apply-patch ~/.pi/agent/extensions/
 cd ~/.pi/agent/extensions/pi-apply-patch && npm install
 
 # 4. Dev / one-shot test
-pi -e /path/to/pi-apply-patch/src/index.ts
+pi -e /path/to/pi-apply-patch/index.ts
 ```
 
 After installation, restart pi or run `/reload` inside an interactive session.
@@ -63,7 +63,7 @@ npm test
 npm run typecheck
 npm run check
 npm pack --dry-run
-pi -e ./src/index.ts
+pi -e ./index.ts
 ```
 
 The test suite uses vitest. TypeScript is strict, Node-only, and uses ESM imports with `.js` suffixes.
