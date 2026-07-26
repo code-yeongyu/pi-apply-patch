@@ -26,5 +26,5 @@
 		"types": ["node"],
 		"noEmit": true
 	},
-	"include": ["src/**/*", "test/**/*"]
+	"include": ["src/**/*", "index.ts", "test/**/*"]
 }

@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	APPLY_PATCH_FREEFORM_DESCRIPTION,
 	APPLY_PATCH_LARK_GRAMMAR,
 	type ApplyPatchExtensionAPI,
+	type ApplyPatchOperations,
 	applyPatch,
 	applyPatchDetailed,
 	createApplyPatchTool,
@@ -213,6 +214,45 @@ describe("pi-apply-patch", () => {
 		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
 	});
 
+	it("#given remote filesystem operations #when apply_patch executes #then writes only through the remote backend", async () => {
+		// given
+		const localDirectory = await createTempDirectory();
+		const remoteDirectory = await createTempDirectory();
+		await writeFile(path.join(remoteDirectory, "sample.txt"), "before\n", "utf-8");
+		const operations: ApplyPatchOperations = {
+			readFile: (absolutePath) => readFile(absolutePath, "utf-8"),
+			writeFileAtomic,
+			mkdir: async (directoryPath) => {
+				await mkdir(directoryPath, { recursive: true });
+			},
+			rm: async (absolutePath) => {
+				await rm(absolutePath);
+			},
+			stat: (absolutePath) => stat(absolutePath),
+			realpath: async (absolutePath) =>
+				absolutePath === localDirectory ? realpath(remoteDirectory) : realpath(absolutePath),
+		};
+		const patch = `*** Begin Patch
+*** Update File: sample.txt
+@@
+-before
++after
+*** End Patch`;
+
+		// when
+		await createApplyPatchTool({ operations }).execute(
+			"apply-patch-remote-operations-test",
+			{ input: patch },
+			undefined,
+			undefined,
+			{ cwd: localDirectory } as never,
+		);
+
+		// then
+		expect(await readFile(path.join(remoteDirectory, "sample.txt"), "utf-8")).toBe("after\n");
+		await expect(readFile(path.join(localDirectory, "sample.txt"), "utf-8")).rejects.toThrow();
+	});
+
 	it("#given parent traversal path #when applying patch #then rejects outside workspace", async () => {
 		// given
 		const directory = await createTempDirectory();
@@ -282,10 +322,9 @@ describe("pi-apply-patch", () => {
 		}
 		expect(update.text).toContain("Applying patch (0/2)...\n• Edited 2 files (+2 -1)");
 		expect(update.text).toContain("sample.txt (+1 -1)");
-		expect(update.text).toContain("-1 before");
-		expect(update.text).toContain("+1 after");
+		expect(update.text).toContain("-before");
+		expect(update.text).toContain("+after");
 		expect(update.text).toContain("created.txt (+1 -0)");
-		expect(update.text).toContain("+1 created");
 		expect(update.text).not.toContain("Index:");
 
 		const component = tool.renderResult?.(
@@ -298,7 +337,7 @@ describe("pi-apply-patch", () => {
 		expect(rendered).toContain("Applying patch");
 		expect(rendered).toContain("• Edited 2 files (+2 -1)");
 		expect(rendered).toContain("sample.txt (+1 -1)");
-		expect(rendered).toContain("+1 after");
+		expect(rendered).toContain("+after");
 		expect(rendered).not.toContain("Index:");
 	});
 
@@ -365,8 +404,8 @@ describe("pi-apply-patch", () => {
 		);
 
 		// then
-		expect(updates[0]).toContain("-30 line-30");
-		expect(updates[0]).toContain("+30 line-30 updated");
+		expect(updates[0]).toContain("-line-30");
+		expect(updates[0]).toContain("+line-30 updated");
 		expect(updates[0]).not.toContain(" 1 line-1");
 		expect(await readFile(path.join(directory, "large.txt"), "utf-8")).toContain("line-30 updated");
 	});
@@ -484,8 +523,8 @@ describe("pi-apply-patch", () => {
 
 		// then
 		expect(updates[0]).toContain("• Edited existing.txt (+1 -1)");
-		expect(updates[0]).toContain("-1 old");
-		expect(updates[0]).toContain("+1 new");
+		expect(updates[0]).toContain("-old");
+		expect(updates[0]).toContain("+new");
 		expect(await readFile(path.join(directory, "existing.txt"), "utf-8")).toBe("new\n");
 	});
 

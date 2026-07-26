@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -5,6 +6,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
 	defineTool,
 	type ExtensionAPI,
+	getAgentDir,
 	getLanguageFromPath,
 	highlightCode,
 	type ToolDefinition,
@@ -13,6 +15,33 @@ import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import * as Diff from "diff";
 import { Type } from "typebox";
 import { writeFileAtomic } from "./write-file-atomic.js";
+
+export type ApplyPatchOperations = {
+	readFile: (absolutePath: string) => Promise<string>;
+	writeFileAtomic: (absolutePath: string, content: string) => Promise<void>;
+	mkdir: (directoryPath: string) => Promise<void>;
+	rm: (absolutePath: string) => Promise<void>;
+	stat: (absolutePath: string) => Promise<unknown>;
+	realpath: (absolutePath: string) => Promise<string>;
+};
+
+export type ApplyPatchToolOptions = {
+	operations?: ApplyPatchOperations;
+	getOperations?: () => ApplyPatchOperations | undefined;
+};
+
+const LOCAL_APPLY_PATCH_OPERATIONS: ApplyPatchOperations = {
+	readFile: (absolutePath) => readFile(absolutePath, "utf-8"),
+	writeFileAtomic,
+	mkdir: async (directoryPath) => {
+		await mkdir(directoryPath, { recursive: true });
+	},
+	rm: async (absolutePath) => {
+		await rm(absolutePath);
+	},
+	stat: (absolutePath) => stat(absolutePath),
+	realpath: (absolutePath) => realpath(absolutePath),
+};
 
 const APPLY_PATCH_PARAMS = Type.Object({
 	input: Type.String({
@@ -42,9 +71,16 @@ type ApplyPatchToolDefinition = ToolDefinition<typeof APPLY_PATCH_PARAMS, ApplyP
 	freeform: FreeformToolFormat;
 };
 
+type ApplyPatchEventBus = {
+	on: (channel: string, handler: (data: unknown) => void) => () => void;
+};
+
 export type ApplyPatchExtensionAPI = Pick<ExtensionAPI, "on" | "getActiveTools" | "setActiveTools"> & {
+	events?: ApplyPatchEventBus;
 	registerTool: (tool: ApplyPatchToolDefinition) => void;
 };
+
+const SSH_REMOTE_APPLY_PATCH_OPERATIONS_EVENT = "ssh-remote:apply-patch-operations";
 
 type ApplyPatchParams = {
 	input: string;
@@ -67,10 +103,32 @@ type ApplyPatchPreview = {
 	removed: number;
 };
 
+/**
+ * Codex-style per-file change that gets persisted in the final tool result.
+ *
+ * Mirrors the shape of `FileChange` in openai/codex: only the hunks-only
+ * unified diff for updates (no full file content, no line numbers) and the
+ * touched file path for adds and deletes. This keeps the session file small
+ * (comparable to `edit` tool output) and lets the TUI re-render the diff
+ * from the final result on demand.
+ */
+export type ApplyPatchFileChange =
+	| { operation: "add"; filePath: string; added: number; removed: number }
+	| { operation: "delete"; filePath: string; added: number; removed: number }
+	| {
+			operation: "update";
+			filePath: string;
+			movePath?: string;
+			unifiedDiff: string;
+			added: number;
+			removed: number;
+	  };
+
 type ApplyPatchToolDetails = {
 	preview?: ApplyPatchPreview;
 	progress?: ApplyPatchProgress;
 	result?: ApplyPatchResult;
+	changes?: ApplyPatchFileChange[];
 };
 
 type ApplyPatchProgress = {
@@ -109,6 +167,7 @@ export type ApplyPatchResult = {
 	failures: ApplyPatchFailure[];
 	hasPartialSuccess: boolean;
 	recoveryInstructions: ApplyPatchRecoveryInstructions;
+	changes: ApplyPatchFileChange[];
 	details: {
 		fuzz: number;
 	};
@@ -175,7 +234,29 @@ function hasErrorCode(error: unknown, code: string): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-const GPT_APPLY_PATCH_PROVIDERS = new Set(["openai", "openai-codex", "azure-openai-responses", "github-copilot"]);
+const DEFAULT_GPT_APPLY_PATCH_PROVIDERS = ["openai", "openai-codex"] as const;
+export const APPLY_PATCH_LOCAL_CONFIG_PATH = path.join(getAgentDir(), "pi-apply-patch.json");
+
+type ApplyPatchLocalConfig = {
+	providers?: unknown;
+};
+
+function getGPTApplyPatchProviders(): Set<string> {
+	try {
+		const config = JSON.parse(readFileSync(APPLY_PATCH_LOCAL_CONFIG_PATH, "utf8")) as ApplyPatchLocalConfig;
+		if (Array.isArray(config.providers)) {
+			const providers = config.providers.filter(
+				(provider): provider is string => typeof provider === "string" && provider.length > 0,
+			);
+			if (providers.length > 0) {
+				return new Set(providers);
+			}
+		}
+	} catch {
+		// Missing or invalid local config falls back to standard providers.
+	}
+	return new Set(DEFAULT_GPT_APPLY_PATCH_PROVIDERS);
+}
 export const PATCH_PREVIEW_MAX_LINES = 16;
 export const PATCH_PREVIEW_MAX_CHARS = 4000;
 const PATCH_PREVIEW_HEAD_LINES = 8;
@@ -203,7 +284,7 @@ function applyLayeredBackground(theme: ApplyPatchTheme, bgName: ApplyPatchThemeB
 }
 
 function isChangedPreviewLine(line: string): boolean {
-	return /^[+-]\s*\d+\s/.test(line);
+	return /^[+-](?:\s*\d+\s|[^\s])/.test(line);
 }
 
 function countWindowLines(lines: string[], start: number, end: number): number {
@@ -335,7 +416,11 @@ eof_line: "*** End of File" LF
 `;
 
 export function isOpenAIGptModel(model: Pick<Model<string>, "provider" | "id"> | undefined): boolean {
-	return model !== undefined && GPT_APPLY_PATCH_PROVIDERS.has(model.provider) && model.id.startsWith("gpt-");
+	return (
+		model !== undefined &&
+		getGPTApplyPatchProviders().has(model.provider) &&
+		model.id.toLowerCase().startsWith("gpt-")
+	);
 }
 
 function normalizePatchText(patchText: string): string {
@@ -431,56 +516,118 @@ export function extractPatchedPaths(patchText: string): string[] {
 	return Array.from(matches, (match) => match[1] ?? "");
 }
 
-function createPatchDiff(oldContent: string, newContent: string): { diff: string; added: number; removed: number } {
-	const parts = Diff.diffLines(oldContent, newContent);
-	const oldLines = oldContent.split("\n");
-	const newLines = newContent.split("\n");
-	const lineNumWidth = String(Math.max(oldLines.length, newLines.length)).length;
+function countDiffLines(content: string): number {
+	if (content === "") return 0;
+	const lines = content.split("\n");
+	if (lines[lines.length - 1] === "") {
+		lines.pop();
+	}
+	return lines.length;
+}
+
+/**
+ * Codex-style hunks-only unified diff (no line numbers, no full-file context).
+ *
+ * Produces the same format as Codex's @format_update_chunks_for_progress:
+ * ``@@ <context>`` headers followed by ``-old`` / ``+new`` lines, with an
+ * optional ``*** End of File`` marker when the parser sets isEndOfFile.
+ */
+function formatUnifiedDiff(chunks: PatchChunk[]): { diff: string; added: number; removed: number } {
 	const output: string[] = [];
-	let oldLineNum = 1;
-	let newLineNum = 1;
 	let added = 0;
 	let removed = 0;
-
-	for (const part of parts) {
-		const rawLines = part.value.split("\n");
-		if (rawLines[rawLines.length - 1] === "") {
-			rawLines.pop();
+	for (const chunk of chunks) {
+		if (chunk.changeContexts.length > 0) {
+			for (const context of chunk.changeContexts) {
+				output.push(`@@ ${context}`);
+			}
+		} else {
+			output.push("@@");
 		}
-
-		for (const line of rawLines) {
-			if (part.added) {
-				output.push(`+${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
-				newLineNum++;
-				added++;
-				continue;
-			}
-
-			if (part.removed) {
-				output.push(`-${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
-				oldLineNum++;
-				removed++;
-				continue;
-			}
-
-			output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
-			oldLineNum++;
-			newLineNum++;
+		for (const line of chunk.oldLines) {
+			output.push(`-${line}`);
+			removed++;
+		}
+		for (const line of chunk.newLines) {
+			output.push(`+${line}`);
+			added++;
+		}
+		if (chunk.isEndOfFile) {
+			output.push("*** End of File");
 		}
 	}
-
 	return { diff: output.join("\n"), added, removed };
 }
 
-async function readExistingFileForPreview(absolutePath: string): Promise<string> {
+async function readExistingFileForPreview(absolutePath: string, operations: ApplyPatchOperations): Promise<string> {
 	try {
-		return await readFile(absolutePath, "utf-8");
+		return await operations.readFile(absolutePath);
 	} catch (error) {
 		if (hasErrorCode(error, "ENOENT")) {
 			return "";
 		}
 		throw error;
 	}
+}
+
+function formatApplyPatchChanges(
+	changes: ApplyPatchFileChange[],
+	cwd: string,
+	expanded: boolean,
+	theme: ApplyPatchTheme,
+): string {
+	if (changes.length === 0) {
+		return "";
+	}
+
+	const lines: string[] = [];
+	const totalAdded = changes.reduce((sum, c) => sum + c.added, 0);
+	const totalRemoved = changes.reduce((sum, c) => sum + c.removed, 0);
+
+	// Header
+	if (changes.length === 1) {
+		const change = changes[0];
+		if (!change) return "";
+		const op = formatPatchOperation(change.operation);
+		const fp = displayPath(change.filePath, cwd);
+		const count = `(+${change.added} -${change.removed})`;
+		const target =
+			change.operation === "update" && change.movePath ? `${fp} → ${displayPath(change.movePath, cwd)}` : fp;
+		lines.push(theme.fg("toolTitle", theme.bold(`${op} ${target}`)));
+		lines.push(`  ${count}`);
+	} else {
+		lines.push(theme.fg("toolTitle", theme.bold(`Edited ${changes.length} files`)));
+		lines.push(`  ${formatLineCountSummary(totalAdded, totalRemoved)}`);
+		for (const change of changes) {
+			const op = formatPatchOperation(change.operation);
+			const fp = displayPath(change.filePath, cwd);
+			const count = `(+${change.added} -${change.removed})`;
+			const target =
+				change.operation === "update" && change.movePath ? `${fp} → ${displayPath(change.movePath, cwd)}` : fp;
+			lines.push(`  └ ${op} ${target} ${count}`);
+		}
+	}
+
+	if (expanded) {
+		for (const change of changes) {
+			if (change.operation === "update" && change.unifiedDiff) {
+				const diffLines = truncatePreview(change.unifiedDiff).split("\n");
+				for (const diffLine of diffLines) {
+					if (diffLine.startsWith("-")) {
+						lines.push(`    ${theme.fg("toolDiffRemoved", diffLine)}`);
+					} else if (diffLine.startsWith("+")) {
+						lines.push(`    ${theme.fg("toolDiffAdded", diffLine)}`);
+					} else if (diffLine.startsWith("@@") || diffLine.startsWith("***")) {
+						lines.push(`    ${theme.fg("muted", diffLine)}`);
+					} else {
+						lines.push(`    ${diffLine}`);
+					}
+				}
+			}
+		}
+	}
+
+	return lines.join("\n");
 }
 
 function formatLineCountSummary(added: number, removed: number): string {
@@ -626,6 +773,20 @@ type RenderableContentDiffLine = RenderableAddedDiffLine | RenderableContextDiff
 type RenderableDiffLine = RenderableContentDiffLine | { kind: "meta"; text: string };
 
 function parseRenderableDiffLine(line: string): RenderableDiffLine {
+	// Handle Codex-style format (no line numbers): +content, -content
+	const simpleMatch = line.match(/^([+-])(?!\s*\d)(.*)$/);
+	if (simpleMatch) {
+		const sign = simpleMatch[1];
+		const content = simpleMatch[2] ?? "";
+		if (sign === "+") {
+			return { content, kind: "added", lineNumber: "", sign };
+		}
+		if (sign === "-") {
+			return { content, kind: "removed", lineNumber: "", sign };
+		}
+	}
+
+	// Handle legacy format (line-numbered): +1 content, -1 content,  1 content
 	const match = line.match(/^([+\- ])(\s*\d+)\s(.*)$/);
 	if (!match) {
 		return { kind: "meta", text: line };
@@ -714,9 +875,9 @@ function renderOpenCodeLikeDiffLine(
 	theme: ApplyPatchTheme,
 	contentOverride?: string,
 ): string {
-	const lineNumber = theme.fg("muted", line.lineNumber);
+	const lineNumberPart = line.lineNumber ? `${theme.fg("muted", line.lineNumber)} ` : "";
 	if (line.kind === "context") {
-		return `${theme.fg("toolDiffContext", line.sign)}${lineNumber} ${highlightDiffContent(line.content, filePath)}`;
+		return `${theme.fg("toolDiffContext", line.sign)}${lineNumberPart}${highlightDiffContent(line.content, filePath)}`;
 	}
 
 	const diffColor = line.kind === "added" ? "toolDiffAdded" : "toolDiffRemoved";
@@ -725,7 +886,7 @@ function renderOpenCodeLikeDiffLine(
 		contentOverride === undefined
 			? highlightDiffContent(line.content, filePath)
 			: theme.fg(diffColor, replaceTabs(contentOverride));
-	const rendered = `${theme.fg(diffColor, line.sign)}${lineNumber} ${content}`;
+	const rendered = `${theme.fg(diffColor, line.sign)}${lineNumberPart}${content}`;
 	return theme.bg(background, rendered);
 }
 
@@ -862,33 +1023,58 @@ function formatPendingPatchPaths(patchText: string): string {
 	return `Applying patch...\n${paths.map((filePath) => `• ${filePath}`).join("\n")}`;
 }
 
-async function createPatchPreview(cwd: string, hunks: ParsedPatch[]): Promise<ApplyPatchPreview> {
+async function createPatchPreview(
+	cwd: string,
+	hunks: ParsedPatch[],
+	operations: ApplyPatchOperations,
+): Promise<ApplyPatchPreview> {
 	const files: ApplyPatchPreviewFile[] = [];
 	for (const hunk of hunks) {
-		const absolutePath = await resolvePatchPath(cwd, hunk.filePath);
+		const absolutePath = await resolvePatchPath(cwd, hunk.filePath, operations);
 		if (hunk.type === "add") {
-			const oldContent = await readExistingFileForPreview(absolutePath);
-			const diff = createPatchDiff(oldContent, hunk.content);
-			files.push({ filePath: hunk.filePath, operation: oldContent.length > 0 ? "update" : "add", ...diff });
+			const oldContent = await readExistingFileForPreview(absolutePath, operations);
+			if (oldContent.length > 0) {
+				// Overwriting existing file — render as update with a minimal inline diff.
+				const removed = splitFileLines(oldContent).length;
+				const added = countDiffLines(hunk.content);
+				const diff = [
+					"@@",
+					...oldContent
+						.split("\n")
+						.filter((line) => line !== "")
+						.map((line) => `-${line}`),
+					...hunk.content
+						.split("\n")
+						.filter((line) => line !== "")
+						.map((line) => `+${line}`),
+				].join("\n");
+				files.push({ filePath: hunk.filePath, operation: "update", diff, added, removed });
+			} else {
+				const added = countDiffLines(hunk.content);
+				files.push({ filePath: hunk.filePath, operation: "add", diff: "", added, removed: 0 });
+			}
 			continue;
 		}
 
 		if (hunk.type === "delete") {
-			const oldContent = await readFile(absolutePath, "utf-8");
-			const diff = createPatchDiff(oldContent, "");
-			files.push({ filePath: hunk.filePath, operation: "delete", ...diff });
+			const oldContent = await operations.readFile(absolutePath);
+			const removed = splitFileLines(oldContent).length;
+			files.push({ filePath: hunk.filePath, operation: "delete", diff: "", added: 0, removed });
 			continue;
 		}
 
-		const oldContent = await readFile(absolutePath, "utf-8");
-		const newContent =
-			hunk.chunks.length === 0 ? oldContent : replaceChunks(oldContent, hunk.filePath, hunk.chunks).content;
+		const unified = formatUnifiedDiff(hunk.chunks);
 		if (hunk.movePath) {
-			await resolvePatchPath(cwd, hunk.movePath);
+			await resolvePatchPath(cwd, hunk.movePath, operations);
 		}
-		const diff = createPatchDiff(oldContent, newContent);
-		const file = { filePath: hunk.filePath, operation: "update", ...diff } satisfies ApplyPatchPreviewFile;
-		files.push(hunk.movePath !== undefined ? { ...file, movePath: hunk.movePath } : file);
+		files.push({
+			filePath: hunk.filePath,
+			operation: "update",
+			diff: unified.diff,
+			added: unified.added,
+			removed: unified.removed,
+			...(hunk.movePath !== undefined ? { movePath: hunk.movePath } : {}),
+		});
 	}
 
 	return {
@@ -1127,69 +1313,102 @@ function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]):
 async function applySingleHunk(
 	cwd: string,
 	hunk: ParsedPatch,
-): Promise<{ summary: string; appliedFile: string; fuzz: number }> {
-	const absolutePath = await resolvePatchPath(cwd, hunk.filePath);
+	operations: ApplyPatchOperations,
+): Promise<{
+	summary: string;
+	appliedFile: string;
+	fuzz: number;
+	change: ApplyPatchFileChange;
+}> {
+	const absolutePath = await resolvePatchPath(cwd, hunk.filePath, operations);
 	if (hunk.type === "add") {
-		await mkdir(path.dirname(absolutePath), { recursive: true });
-		await writeFileAtomic(absolutePath, hunk.content);
-		return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+		await operations.mkdir(path.dirname(absolutePath));
+		await operations.writeFileAtomic(absolutePath, hunk.content);
+		const added = countDiffLines(hunk.content);
+		return {
+			summary: `add: ${hunk.filePath}`,
+			appliedFile: hunk.filePath,
+			fuzz: 0,
+			change: { operation: "add", filePath: hunk.filePath, added, removed: 0 },
+		};
 	}
 
 	if (hunk.type === "delete") {
-		await stat(absolutePath);
-		await rm(absolutePath);
-		return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0 };
+		await operations.stat(absolutePath);
+		const oldContent = await operations.readFile(absolutePath);
+		await operations.rm(absolutePath);
+		const removed = splitFileLines(oldContent).length;
+		return {
+			summary: `delete: ${hunk.filePath}`,
+			appliedFile: hunk.filePath,
+			fuzz: 0,
+			change: { operation: "delete", filePath: hunk.filePath, added: 0, removed },
+		};
 	}
 
-	const currentContent = await readFile(absolutePath, "utf-8");
+	const currentContent = await operations.readFile(absolutePath);
 	const chunkResult =
 		hunk.chunks.length === 0
 			? { content: currentContent, fuzz: 0 }
 			: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
 	const nextContent = chunkResult.content;
+	const unified = formatUnifiedDiff(hunk.chunks);
+	const change: ApplyPatchFileChange = {
+		operation: "update",
+		filePath: hunk.filePath,
+		unifiedDiff: unified.diff,
+		added: unified.added,
+		removed: unified.removed,
+	};
 
 	if (hunk.movePath) {
-		const absoluteMovePath = await resolvePatchPath(cwd, hunk.movePath);
-		await mkdir(path.dirname(absoluteMovePath), { recursive: true });
-		await writeFileAtomic(absoluteMovePath, nextContent);
+		const absoluteMovePath = await resolvePatchPath(cwd, hunk.movePath, operations);
+		await operations.mkdir(path.dirname(absoluteMovePath));
+		await operations.writeFileAtomic(absoluteMovePath, nextContent);
 		if (absoluteMovePath !== absolutePath) {
-			await rm(absolutePath);
+			await operations.rm(absolutePath);
 		}
+		change.movePath = hunk.movePath;
 		return {
 			summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
 			appliedFile: hunk.movePath,
 			fuzz: chunkResult.fuzz,
+			change,
 		};
 	}
 
-	await writeFileAtomic(absolutePath, nextContent);
-	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz };
+	await operations.writeFileAtomic(absolutePath, nextContent);
+	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz, change };
 }
 
 export async function applyPatchDetailed(
 	cwd: string,
 	patchText: string,
 	onProgress?: ApplyPatchProgressCallback,
+	operations: ApplyPatchOperations = LOCAL_APPLY_PATCH_OPERATIONS,
 ): Promise<ApplyPatchResult> {
-	return applyParsedPatchDetailed(cwd, parseNonEmptyPatch(patchText), onProgress);
+	return applyParsedPatchDetailed(cwd, parseNonEmptyPatch(patchText), onProgress, operations);
 }
 
 async function applyParsedPatchDetailed(
 	cwd: string,
 	hunks: ParsedPatch[],
 	onProgress?: ApplyPatchProgressCallback,
+	operations: ApplyPatchOperations = LOCAL_APPLY_PATCH_OPERATIONS,
 ): Promise<ApplyPatchResult> {
 	const summaries: string[] = [];
 	const appliedFiles: string[] = [];
 	const failures: ApplyPatchFailure[] = [];
+	const changes: ApplyPatchFileChange[] = [];
 	let fuzz = 0;
 
 	for (const hunk of hunks) {
 		try {
-			const { summary, appliedFile, fuzz: hunkFuzz } = await applySingleHunk(cwd, hunk);
+			const { summary, appliedFile, fuzz: hunkFuzz, change } = await applySingleHunk(cwd, hunk, operations);
 			summaries.push(summary);
 			appliedFiles.push(appliedFile);
 			fuzz += hunkFuzz;
+			changes.push(change);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			failures.push({ filePath: hunk.filePath, operation: hunk.type, message });
@@ -1205,6 +1424,7 @@ async function applyParsedPatchDetailed(
 		summaries,
 		appliedFiles,
 		failures,
+		changes,
 		hasPartialSuccess: appliedFiles.length > 0 && failures.length > 0,
 		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
 		details: { fuzz },
@@ -1222,22 +1442,29 @@ function createRecoveryInstructions(
 	return { mustReadFiles, mustNotReadFiles };
 }
 
-export async function applyPatch(cwd: string, patchText: string): Promise<string[]> {
+export async function applyPatch(
+	cwd: string,
+	patchText: string,
+	operations: ApplyPatchOperations = LOCAL_APPLY_PATCH_OPERATIONS,
+): Promise<string[]> {
 	const hunks = parseNonEmptyPatch(patchText);
 
 	const summaries: string[] = [];
 	const appliedFiles: string[] = [];
+	const changes: ApplyPatchFileChange[] = [];
 	for (const hunk of hunks) {
 		try {
-			const { summary, appliedFile } = await applySingleHunk(cwd, hunk);
+			const { summary, appliedFile, change } = await applySingleHunk(cwd, hunk, operations);
 			summaries.push(summary);
 			appliedFiles.push(appliedFile);
+			changes.push(change);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const failure = { filePath: hunk.filePath, operation: hunk.type, message } satisfies ApplyPatchFailure;
 			const result: ApplyPatchResult = {
 				summaries,
 				appliedFiles,
+				changes,
 				failures: [failure],
 				hasPartialSuccess: appliedFiles.length > 0,
 				recoveryInstructions: createRecoveryInstructions({
@@ -1259,6 +1486,7 @@ async function createPendingPatchUpdate(
 	progress?: ApplyPatchProgress,
 	previewOverride?: ApplyPatchPreview,
 	parsedHunks?: ParsedPatch[],
+	operations: ApplyPatchOperations = LOCAL_APPLY_PATCH_OPERATIONS,
 ): Promise<{ text: string; details: ApplyPatchToolDetails | undefined }> {
 	const title = progress
 		? `Applying patch (${progress.applied + progress.failed}/${progress.total})...`
@@ -1278,7 +1506,7 @@ async function createPendingPatchUpdate(
 			return { text: title, details: progress ? { progress } : undefined };
 		}
 
-		const preview = await createPatchPreview(cwd, hunks);
+		const preview = await createPatchPreview(cwd, hunks, operations);
 		if (preview.files.some((file) => file.diff.trim().length > 0)) {
 			const details: ApplyPatchToolDetails = { preview };
 			if (progress) details.progress = progress;
@@ -1317,11 +1545,15 @@ function isPathWithinWorkspace(workspacePath: string, candidatePath: string): bo
 	);
 }
 
-async function findExistingAncestor(directoryPath: string, workspacePath: string): Promise<string> {
+async function findExistingAncestor(
+	directoryPath: string,
+	workspacePath: string,
+	operations: ApplyPatchOperations,
+): Promise<string> {
 	let currentPath = directoryPath;
 	while (isPathWithinWorkspace(workspacePath, currentPath)) {
 		try {
-			await stat(currentPath);
+			await operations.stat(currentPath);
 			return currentPath;
 		} catch (error) {
 			if (!hasErrorCode(error, "ENOENT")) {
@@ -1339,15 +1571,19 @@ async function findExistingAncestor(directoryPath: string, workspacePath: string
 	throw new PatchApplicationError(`Patch path escapes workspace: ${directoryPath}`);
 }
 
-async function resolvePatchPath(cwd: string, filePath: string): Promise<string> {
-	const workspacePath = await realpath(cwd);
+async function resolvePatchPath(
+	cwd: string,
+	filePath: string,
+	operations: ApplyPatchOperations = LOCAL_APPLY_PATCH_OPERATIONS,
+): Promise<string> {
+	const workspacePath = await operations.realpath(cwd);
 	const absolutePath = path.resolve(workspacePath, filePath);
 	if (!isPathWithinWorkspace(workspacePath, absolutePath)) {
 		throw new PatchApplicationError(`Patch path escapes workspace: ${filePath}`);
 	}
 
-	const existingAncestor = await findExistingAncestor(path.dirname(absolutePath), workspacePath);
-	const realAncestor = await realpath(existingAncestor);
+	const existingAncestor = await findExistingAncestor(path.dirname(absolutePath), workspacePath, operations);
+	const realAncestor = await operations.realpath(existingAncestor);
 	if (!isPathWithinWorkspace(workspacePath, realAncestor)) {
 		throw new PatchApplicationError(`Patch path escapes workspace: ${filePath}`);
 	}
@@ -1368,17 +1604,24 @@ function syncToolset(
 	pi.setActiveTools(replaceApplyPatchWithEditTools(currentToolNames));
 }
 
-export function createApplyPatchTool(): ApplyPatchToolDefinition {
+export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): ApplyPatchToolDefinition {
 	const tool = defineTool({
 		name: "apply_patch",
 		label: "ApplyPatch",
 		description: APPLY_PATCH_FREEFORM_DESCRIPTION,
 		parameters: APPLY_PATCH_PARAMS,
 		prepareArguments: normalizeApplyPatchArguments,
-		promptSnippet: "Apply Codex-format file patches with apply_patch",
+		promptSnippet:
+			"Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`).",
 		promptGuidelines: [
-			"Use apply_patch for file edits instead of mutating files through bash, Python scripts, heredocs, or shell redirection.",
-			"After apply_patch succeeds, do not re-read the edited files just to confirm the patch applied.",
+			"Patches MUST begin with `*** Begin Patch` and end with `*** End Patch`.",
+			"Use one of these operation headers per file: `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>`.",
+			"Every added line must start with `+`, removed lines with `-`, unchanged context with a single space.",
+			"Use `*** Move to: <new path>` directly after `*** Update File:` to rename; use `*** End of File` only when the hunk reaches actual EOF.",
+			"Use `@@` (optionally with a class/function header) when 3 lines of context are insufficient to uniquely identify the snippet.",
+			"File references MUST be relative — never absolute.",
+			"Do not re-read files after `apply_patch` succeeds.",
+			"Do not edit files via bash, Python, or heredocs when `apply_patch` is available.",
 		],
 		async execute(
 			_toolCallId,
@@ -1392,6 +1635,7 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				throw new Error("input is required");
 			}
 
+			const operations = options.getOperations?.() ?? options.operations ?? LOCAL_APPLY_PATCH_OPERATIONS;
 			let parsedHunks: ParsedPatch[] | undefined;
 			try {
 				parsedHunks = parseNonEmptyPatch(normalizedParams.input);
@@ -1406,6 +1650,7 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				initialProgress,
 				undefined,
 				parsedHunks,
+				operations,
 			);
 			onUpdate?.({
 				content: [{ type: "text", text: pendingUpdate.text }],
@@ -1423,12 +1668,14 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 						progress,
 						preview,
 						parsedHunks,
+						operations,
 					);
 					onUpdate?.({
 						content: [{ type: "text", text: progressUpdate.text }],
 						details: progressUpdate.details,
 					});
 				},
+				operations,
 			);
 			if (result.failures.length > 0) {
 				const mustReadFiles = result.recoveryInstructions.mustReadFiles;
@@ -1453,13 +1700,13 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 								.join("\n"),
 						},
 					],
-					details: { result },
+					details: { result, changes: result.changes },
 				};
 			}
 
 			return {
 				content: [{ type: "text", text: result.summaries.join("\n") }],
-				details: { result },
+				details: { result, changes: result.changes },
 			};
 		},
 		renderCall(args, theme, context) {
@@ -1474,7 +1721,23 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 		},
 		renderResult(result, options, theme, context) {
 			const component = new Container();
+			const changes = result.details?.changes;
 			const preview = result.details?.preview;
+
+			// Final (settled) result: render from Codex-style changes when available.
+			if (changes && !options.isPartial) {
+				const bgName = "toolSuccessBg";
+				const box = new Box(1, 1, (text: string) => applyLayeredBackground(theme, bgName, text));
+				box.addChild(new Text(theme.fg("toolTitle", theme.bold("Applied patch")), 0, 0));
+				box.addChild(new Spacer(1));
+				box.addChild(
+					new Text(formatApplyPatchChanges(changes, context.cwd, options.expanded ?? true, theme), 0, 0),
+				);
+				component.addChild(box);
+				return component;
+			}
+
+			// Streaming / partial result: render from preview (full-file diff with line numbers).
 			if (preview) {
 				const bgName = options.isPartial ? "toolPendingBg" : "toolSuccessBg";
 				const progress = result.details?.progress;
@@ -1512,7 +1775,16 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 }
 
 export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI): void {
-	pi.registerTool(createApplyPatchTool());
+	let remoteOperations: ApplyPatchOperations | undefined;
+	pi.events?.on(SSH_REMOTE_APPLY_PATCH_OPERATIONS_EVENT, (data) => {
+		if (typeof data !== "object" || data === null) {
+			remoteOperations = undefined;
+			return;
+		}
+		remoteOperations = (data as { operations?: ApplyPatchOperations | null }).operations ?? undefined;
+	});
+
+	pi.registerTool(createApplyPatchTool({ getOperations: () => remoteOperations }));
 
 	pi.on("session_start", async (_event, ctx) => {
 		syncToolset(pi, ctx.model);
