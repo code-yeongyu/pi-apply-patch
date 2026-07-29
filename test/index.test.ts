@@ -26,9 +26,10 @@ const identityTheme = {
 };
 type ApplyPatchTool = ReturnType<typeof createApplyPatchTool>;
 type ApplyPatchUpdate = Parameters<NonNullable<Parameters<ApplyPatchTool["execute"]>[3]>>[0];
+type ToolsetModel = { provider: string; id: string; api?: string };
 type ToolsetHandler = (
-	event: { model?: { provider: string; id: string } },
-	ctx: { model: { provider: string; id: string } | undefined },
+	event: { model?: ToolsetModel },
+	ctx: { model: ToolsetModel | undefined },
 ) => void | Promise<void>;
 
 function isToolsetHandler(value: unknown): value is ToolsetHandler {
@@ -37,7 +38,7 @@ function isToolsetHandler(value: unknown): value is ToolsetHandler {
 
 function createToolsetTestApi(initialActiveTools: string[]): {
 	api: ApplyPatchExtensionAPI;
-	trigger: (eventName: string, model: { provider: string; id: string } | undefined) => Promise<void>;
+	trigger: (eventName: string, model: ToolsetModel | undefined) => Promise<void>;
 	setActiveTools: (toolNames: string[]) => void;
 	getActiveTools: () => string[];
 	getSetActiveToolsCalls: () => string[][];
@@ -151,6 +152,22 @@ describe("pi-apply-patch", () => {
 
 		// when
 		await harness.trigger("session_start", { provider: "openai", id: "gpt-5" });
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "apply_patch"]);
+	});
+
+	it("#given custom Responses provider with GPT model #when session starts #then enables apply_patch", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "edit", "write"]);
+		registerApplyPatchExtension(harness.api);
+
+		// when
+		await harness.trigger("session_start", {
+			provider: "openai-proxy",
+			id: "gpt-5.6-sol",
+			api: "openai-responses",
+		});
 
 		// then
 		expect(harness.getActiveTools()).toEqual(["read", "apply_patch"]);
@@ -910,7 +927,11 @@ EOF`;
 	it("#given model metadata #when checking GPT activation #then only OpenAI GPT models match", () => {
 		expect(isOpenAIGptModel({ provider: "openai", id: "gpt-5" })).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai-codex", id: "gpt-5.5" })).toBe(true);
+		expect(isOpenAIGptModel({ provider: "openai-proxy", id: "gpt-5.6-sol", api: "openai-responses" })).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai", id: "o1" })).toBe(false);
 		expect(isOpenAIGptModel({ provider: "anthropic", id: "gpt-5" })).toBe(false);
+		expect(isOpenAIGptModel({ provider: "anthropic-proxy", id: "gpt-5.6-sol", api: "anthropic-messages" })).toBe(
+			false,
+		);
 	});
 });
