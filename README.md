@@ -8,7 +8,8 @@ The extension registers one LLM-callable tool: `apply_patch`. The tool accepts C
 
 | Case | Result |
 |------|--------|
-| OpenAI GPT model active | replaces `write` and `edit` with `apply_patch` |
+| OpenAI GPT provider active | replaces `write` and `edit` with `apply_patch` |
+| Custom `openai-responses` GPT provider active | replaces `write` and `edit` with `apply_patch` |
 | Non-GPT model active | restores the original `write` and `edit` toolset |
 | Raw freeform patch input | accepted and applied |
 | JSON `{ "input": "..." }` patch input | accepted and applied |
@@ -33,6 +34,8 @@ Use this tool to edit files with the Codex patch format.
 ```
 
 The OpenAI Responses API receives this as a custom freeform grammar tool, not as a JSON function tool.
+
+Custom provider names are supported when the model id starts with `gpt-` and its Pi API is `openai-responses` or `openai-codex-responses`. For example, a model registered as `openai-proxy/gpt-5.6-sol` with `api: "openai-responses"` activates `apply_patch` without adding the provider name to a hard-coded allowlist.
 
 ## Installation
 
