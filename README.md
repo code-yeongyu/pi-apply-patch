@@ -33,9 +33,9 @@ Use this tool to edit files with the Codex patch format.
 *** End Patch
 ```
 
-The OpenAI Responses API receives this as a custom freeform grammar tool, not as a JSON function tool.
+Pi exposes this as a freeform grammar tool. Models with `compat.supportsOpenAIGrammarTools` enabled receive an OpenAI custom grammar tool; other Responses-compatible models fall back to a function tool with an `input` string.
 
-Custom provider names are supported when the model id starts with `gpt-` and its Pi API is `openai-responses` or `openai-codex-responses`. For example, a model registered as `openai-proxy/gpt-5.6-sol` with `api: "openai-responses"` activates `apply_patch` without adding the provider name to a hard-coded allowlist.
+Custom provider names are supported when the model id starts with `gpt-` and its Pi API is `openai-responses` or `openai-codex-responses`. For example, a model registered as `my-proxy/gpt-5` with `api: "openai-responses"` activates `apply_patch` without adding the provider name to a hard-coded allowlist.
 
 ## Installation
 
