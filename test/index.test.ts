@@ -164,8 +164,8 @@ describe("pi-apply-patch", () => {
 
 		// when
 		await harness.trigger("session_start", {
-			provider: "openai-proxy",
-			id: "gpt-5.6-sol",
+			provider: "my-proxy",
+			id: "gpt-5",
 			api: "openai-responses",
 		});
 
@@ -924,14 +924,14 @@ EOF`;
 		expect(extractPatchedPaths(patch)).toEqual(["src/app.ts", "src/new.ts", "src/old.ts", "src/moved.ts"]);
 	});
 
-	it("#given model metadata #when checking GPT activation #then only OpenAI GPT models match", () => {
+	it("#given model metadata #when checking GPT activation #then matches known providers and Responses APIs", () => {
 		expect(isOpenAIGptModel({ provider: "openai", id: "gpt-5" })).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai-codex", id: "gpt-5.5" })).toBe(true);
-		expect(isOpenAIGptModel({ provider: "openai-proxy", id: "gpt-5.6-sol", api: "openai-responses" })).toBe(true);
+		expect(isOpenAIGptModel({ provider: "my-proxy", id: "gpt-5", api: "openai-responses" })).toBe(true);
+		expect(isOpenAIGptModel({ provider: "codex-proxy", id: "gpt-5", api: "openai-codex-responses" })).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai", id: "o1" })).toBe(false);
 		expect(isOpenAIGptModel({ provider: "anthropic", id: "gpt-5" })).toBe(false);
-		expect(isOpenAIGptModel({ provider: "anthropic-proxy", id: "gpt-5.6-sol", api: "anthropic-messages" })).toBe(
-			false,
-		);
+		expect(isOpenAIGptModel({ provider: "my-proxy", id: "claude-sonnet", api: "openai-responses" })).toBe(false);
+		expect(isOpenAIGptModel({ provider: "anthropic-proxy", id: "gpt-5", api: "anthropic-messages" })).toBe(false);
 	});
 });
