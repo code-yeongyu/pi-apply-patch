@@ -97,11 +97,13 @@ export type ApplyPatchFailure = {
 	filePath: string;
 	operation: ApplyPatchOperation;
 	message: string;
+	code?: string | undefined;
 };
 
 export type ApplyPatchRecoveryInstructions = {
 	mustReadFiles: string[];
 	mustNotReadFiles: string[];
+	failedFiles: string[];
 };
 
 export type ApplyPatchResult = {
@@ -1207,7 +1209,11 @@ async function applyParsedPatchDetailed(
 			fuzz += hunkFuzz;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			failures.push({ filePath: hunk.filePath, operation: hunk.type, message });
+			const code =
+				error && typeof error === "object" && "code" in error && typeof error.code === "string"
+					? error.code
+					: undefined;
+			failures.push({ filePath: hunk.filePath, operation: hunk.type, message, code });
 		}
 		await notifyApplyPatchProgress(onProgress, {
 			applied: appliedFiles.length,
@@ -1221,20 +1227,28 @@ async function applyParsedPatchDetailed(
 		appliedFiles,
 		failures,
 		hasPartialSuccess: appliedFiles.length > 0 && failures.length > 0,
-		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
+		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [], failedFiles: [] },
 		details: { fuzz },
 	};
 	result.recoveryInstructions = createRecoveryInstructions(result);
 	return result;
 }
 
+function isRereadCandidate(failure: ApplyPatchFailure): boolean {
+	// ENOENT (missing file), EACCES/EPERM (permission), ENOTDIR/EISDIR (path) are
+	// not context mismatches — rereading will not fix them. Only context-line
+	// failures (no code, thrown by replaceChunks) benefit from a reread.
+	return failure.code === undefined;
+}
+
 function createRecoveryInstructions(
 	result: Pick<ApplyPatchResult, "appliedFiles" | "failures">,
 ): ApplyPatchRecoveryInstructions {
-	const mustReadFiles = [...new Set(result.failures.map((failure) => failure.filePath))];
+	const mustReadFiles = [...new Set(result.failures.filter(isRereadCandidate).map((failure) => failure.filePath))];
 	const mustReadFileSet = new Set(mustReadFiles);
+	const failedFileSet = new Set(result.failures.map((failure) => failure.filePath));
 	const mustNotReadFiles = [...new Set(result.appliedFiles.filter((filePath) => !mustReadFileSet.has(filePath)))];
-	return { mustReadFiles, mustNotReadFiles };
+	return { mustReadFiles, mustNotReadFiles, failedFiles: [...failedFileSet] };
 }
 
 export async function applyPatch(cwd: string, patchText: string): Promise<string[]> {
@@ -1249,7 +1263,11 @@ export async function applyPatch(cwd: string, patchText: string): Promise<string
 			appliedFiles.push(appliedFile);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			const failure = { filePath: hunk.filePath, operation: hunk.type, message } satisfies ApplyPatchFailure;
+			const code =
+				error && typeof error === "object" && "code" in error && typeof error.code === "string"
+					? error.code
+					: undefined;
+			const failure = { filePath: hunk.filePath, operation: hunk.type, message, code } satisfies ApplyPatchFailure;
 			const result: ApplyPatchResult = {
 				summaries,
 				appliedFiles,
@@ -1430,8 +1448,10 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 				},
 			);
 			if (result.failures.length > 0) {
+				const failureLines = result.failures.map(
+					(failure) => `- ${failure.filePath} (${failure.operation}): ${failure.message}`,
+				);
 				const mustReadFiles = result.recoveryInstructions.mustReadFiles;
-				const failed = mustReadFiles.join(", ");
 				const mustReadText = mustReadFiles.join(" and ");
 				return {
 					content: [
@@ -1439,8 +1459,9 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 							type: "text",
 							text: [
 								result.hasPartialSuccess ? "apply_patch partially failed." : "apply_patch failed.",
-								`Failed: ${failed}`,
-								`Recovery: MUST read ${mustReadText} before retrying.`,
+								"Failed:",
+								...failureLines,
+								mustReadFiles.length > 0 ? `Recovery: MUST read ${mustReadText} before retrying.` : "",
 								result.appliedFiles.length > 0
 									? "Earlier file actions in this patch were already applied."
 									: "No file actions were applied.",
