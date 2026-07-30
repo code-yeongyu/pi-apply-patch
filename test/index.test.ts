@@ -894,7 +894,8 @@ EOF`;
 		// then
 		const text = result.content.find((block) => block.type === "text")?.text ?? "";
 		expect(text).toContain("apply_patch partially failed.");
-		expect(text).toContain("Failed: broken.txt");
+		expect(text).toContain("Failed:");
+		expect(text).toContain("- broken.txt (update):");
 		expect(text).toContain("Recovery: MUST read broken.txt before retrying.");
 		expect(text).toContain("Earlier file actions in this patch were already applied.");
 		expect(text).toContain(
@@ -923,6 +924,51 @@ EOF`;
 		expect(text).toContain("apply_patch failed.");
 		expect(text).not.toContain("partially failed");
 		expect(text).toContain("No file actions were applied.");
+	});
+
+	it("#given update of missing file #when executed #then discloses ENOENT reason without reread advice", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const patch = `*** Begin Patch
+*** Update File: missing.txt
+@@
+-old
++new
+*** End Patch`;
+
+		// when
+		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
+			cwd: directory,
+		} as never);
+
+		// then
+		const text = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(text).toContain("missing.txt");
+		expect(text).toContain("ENOENT");
+		expect(text).not.toContain("MUST read");
+	});
+
+	it("#given context mismatch on existing file #when executed #then discloses reason with reread advice", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "exists.txt"), "line\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: exists.txt
+@@
+-missing
++new
+*** End Patch`;
+
+		// when
+		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
+			cwd: directory,
+		} as never);
+
+		// then
+		const text = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(text).toContain("exists.txt");
+		expect(text).toContain("MUST read exists.txt");
+		expect(text).toMatch(/expected lines|context|find/i);
 	});
 
 	it("#given concurrent patches to different lines in one file #when applied #then preserves both updates", async () => {
