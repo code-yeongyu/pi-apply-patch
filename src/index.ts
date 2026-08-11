@@ -178,6 +178,7 @@ function hasErrorCode(error: unknown, code: string): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
+const APPLY_PATCH_MODEL_ID_PREFIXES = ["gpt-", "deepseek-"] as const;
 const GPT_APPLY_PATCH_PROVIDERS = new Set(["openai", "openai-codex", "azure-openai-responses", "github-copilot"]);
 const GPT_APPLY_PATCH_APIS = new Set(["openai-responses", "openai-codex-responses"]);
 export const PATCH_PREVIEW_MAX_LINES = 16;
@@ -338,16 +339,21 @@ eof_line: "*** End of File" LF
 %import common.LF
 `;
 
-export function isOpenAIGptModel(
-	model: (Pick<Model<string>, "provider" | "id"> & Partial<Pick<Model<string>, "api">>) | undefined,
-): boolean {
-	if (!model?.id.startsWith("gpt-")) {
+export type ApplyPatchCandidateModel = Pick<Model<string>, "provider" | "id"> & Partial<Pick<Model<string>, "api">>;
+
+export function isApplyPatchCapableModel(model: ApplyPatchCandidateModel | undefined): boolean {
+	if (!model || !APPLY_PATCH_MODEL_ID_PREFIXES.some((prefix) => model.id.startsWith(prefix))) {
 		return false;
 	}
 
 	return (
 		GPT_APPLY_PATCH_PROVIDERS.has(model.provider) || (model.api !== undefined && GPT_APPLY_PATCH_APIS.has(model.api))
 	);
+}
+
+/** @deprecated Use {@link isApplyPatchCapableModel}. */
+export function isOpenAIGptModel(model: ApplyPatchCandidateModel | undefined): boolean {
+	return isApplyPatchCapableModel(model);
 }
 
 function normalizePatchText(patchText: string): string {
@@ -1377,7 +1383,7 @@ function syncToolset(
 	model: Model<string> | undefined,
 ): void {
 	const currentToolNames = pi.getActiveTools();
-	if (isOpenAIGptModel(model)) {
+	if (isApplyPatchCapableModel(model)) {
 		pi.setActiveTools(replaceEditToolsWithApplyPatch(currentToolNames));
 		return;
 	}
