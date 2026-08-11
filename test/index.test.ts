@@ -10,6 +10,7 @@ import {
 	createApplyPatchTool,
 	extractPatchedPaths,
 	type FreeformToolFormat,
+	isApplyPatchCapableModel,
 	isOpenAIGptModel,
 	PatchParseError,
 	registerApplyPatchExtension,
@@ -166,6 +167,22 @@ describe("pi-apply-patch", () => {
 		await harness.trigger("session_start", {
 			provider: "my-proxy",
 			id: "gpt-5",
+			api: "openai-responses",
+		});
+
+		// then
+		expect(harness.getActiveTools()).toEqual(["read", "apply_patch"]);
+	});
+
+	it("#given DeepSeek model on custom Responses provider #when session starts #then enables apply_patch", async () => {
+		// given
+		const harness = createToolsetTestApi(["read", "edit", "write"]);
+		registerApplyPatchExtension(harness.api);
+
+		// when
+		await harness.trigger("session_start", {
+			provider: "opencode-go-responses",
+			id: "deepseek-v4-flash",
 			api: "openai-responses",
 		});
 
@@ -1097,14 +1114,39 @@ EOF`;
 		expect(extractPatchedPaths(patch)).toEqual(["src/app.ts", "src/new.ts", "src/old.ts", "src/moved.ts"]);
 	});
 
-	it("#given model metadata #when checking GPT activation #then matches known providers and Responses APIs", () => {
+	it("#given model metadata #when checking apply_patch activation #then matches GPT and DeepSeek models on Responses APIs", () => {
+		expect(isApplyPatchCapableModel({ provider: "openai", id: "gpt-5" })).toBe(true);
+		expect(isApplyPatchCapableModel({ provider: "openai-codex", id: "gpt-5.5" })).toBe(true);
+		expect(isApplyPatchCapableModel({ provider: "my-proxy", id: "gpt-5", api: "openai-responses" })).toBe(true);
+		expect(isApplyPatchCapableModel({ provider: "codex-proxy", id: "gpt-5", api: "openai-codex-responses" })).toBe(
+			true,
+		);
+		expect(
+			isApplyPatchCapableModel({
+				provider: "opencode-go-responses",
+				id: "deepseek-v4-flash",
+				api: "openai-responses",
+			}),
+		).toBe(true);
+		expect(
+			isApplyPatchCapableModel({ provider: "my-proxy", id: "deepseek-v4-flash", api: "openai-codex-responses" }),
+		).toBe(true);
+		expect(isApplyPatchCapableModel({ provider: "openai", id: "o1" })).toBe(false);
+		expect(isApplyPatchCapableModel({ provider: "anthropic", id: "gpt-5" })).toBe(false);
+		expect(isApplyPatchCapableModel({ provider: "my-proxy", id: "claude-sonnet", api: "openai-responses" })).toBe(
+			false,
+		);
+		expect(isApplyPatchCapableModel({ provider: "anthropic-proxy", id: "gpt-5", api: "anthropic-messages" })).toBe(
+			false,
+		);
+		expect(isApplyPatchCapableModel({ provider: "my-proxy", id: "deepseek-chat", api: "anthropic-messages" })).toBe(
+			false,
+		);
+
+		// legacy alias stays consistent
+		expect(
+			isOpenAIGptModel({ provider: "opencode-go-responses", id: "deepseek-v4-flash", api: "openai-responses" }),
+		).toBe(true);
 		expect(isOpenAIGptModel({ provider: "openai", id: "gpt-5" })).toBe(true);
-		expect(isOpenAIGptModel({ provider: "openai-codex", id: "gpt-5.5" })).toBe(true);
-		expect(isOpenAIGptModel({ provider: "my-proxy", id: "gpt-5", api: "openai-responses" })).toBe(true);
-		expect(isOpenAIGptModel({ provider: "codex-proxy", id: "gpt-5", api: "openai-codex-responses" })).toBe(true);
-		expect(isOpenAIGptModel({ provider: "openai", id: "o1" })).toBe(false);
-		expect(isOpenAIGptModel({ provider: "anthropic", id: "gpt-5" })).toBe(false);
-		expect(isOpenAIGptModel({ provider: "my-proxy", id: "claude-sonnet", api: "openai-responses" })).toBe(false);
-		expect(isOpenAIGptModel({ provider: "anthropic-proxy", id: "gpt-5", api: "anthropic-messages" })).toBe(false);
 	});
 });
