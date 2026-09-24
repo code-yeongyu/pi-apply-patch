@@ -6,8 +6,8 @@
 
 ## Verification
 
-- [ ] `npm run check` (typecheck + biome)
-- [ ] `npm test` (unit tests)
+- [ ] `bun run check` (typecheck + biome)
+- [ ] `bun run test` (unit tests)
 - [ ] `npm pack --dry-run` (release sanity)
 - [ ] `pi -e ./src/index.ts` smoke-tested locally, if behavior changed
 

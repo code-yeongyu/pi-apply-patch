@@ -61,13 +61,15 @@ After installation, restart pi or run `/reload` inside an interactive session.
 ## Development
 
 ```bash
-npm install
-npm test
-npm run typecheck
-npm run check
+bun install
+bun run test
+bun run typecheck
+bun run check
 npm pack --dry-run
 pi -e ./src/index.ts
 ```
+
+Development and CI use Bun 1.4.2. `package-lock.json` is kept alongside `bun.lock` so `npm ci && npm test` keeps working for npm consumers.
 
 The test suite uses vitest. TypeScript is strict, Node-only, and uses ESM imports with `.js` suffixes.
 
