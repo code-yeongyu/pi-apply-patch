@@ -52,9 +52,15 @@ function createToolsetTestApi(initialActiveTools: string[]): {
 			const eventName = args[0];
 			const handler = args[1];
 			if (typeof eventName !== "string" || !isToolsetHandler(handler)) {
-				return;
+				return () => {};
 			}
 			handlers.set(eventName, [...(handlers.get(eventName) ?? []), handler]);
+			return () => {
+				handlers.set(
+					eventName,
+					(handlers.get(eventName) ?? []).filter((registered) => registered !== handler),
+				);
+			};
 		},
 		getActiveTools() {
 			return [...activeTools];
@@ -112,7 +118,9 @@ describe("pi-apply-patch", () => {
 				capturedDescription = tool.description;
 				capturedFreeform = tool.freeform;
 			},
-			on() {},
+			on() {
+				return () => {};
+			},
 			getActiveTools() {
 				return ["read", "write", "edit"];
 			},

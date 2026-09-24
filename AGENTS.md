@@ -12,18 +12,19 @@ Conventions for human contributors and AI agents working on this repository.
 
 ## Commands
 
-- `npm install` — install dependencies.
-- `npm test` — run vitest once.
-- `npm run typecheck` — strict TypeScript check.
-- `npm run check` — type check + biome.
+- `bun install` — install dependencies (Bun 1.4.2; `bun.lock` and `package-lock.json` are both committed).
+- `bun run test` — run vitest once.
+- `bun run typecheck` — strict TypeScript check.
+- `bun run check` — type check + biome.
+- `npm ci && npm test` — npm consumer smoke (CI runs this too; keep `package-lock.json` in sync with `npm install --package-lock-only --ignore-scripts`).
 - `pi -e ./src/index.ts` — load the extension into a local pi session for manual smoke testing.
 
 ## Constraints
 
-- No Bun APIs. Runtime is Node only.
+- No Bun APIs in `src/`. Runtime is Node only; Bun is the dev and CI toolchain.
 - This extension registers the `apply_patch` tool and only activates it for OpenAI GPT-family models.
 - Keep the tool schema, grammar, and descriptions byte-for-byte compatible with Codex unless intentionally updating the golden source.
-- No dependency on pi-coding-agent internal modules outside the documented public extension API in `@mariozechner/pi-coding-agent`.
+- No dependency on pi-coding-agent internal modules outside the documented public extension API in `@earendil-works/pi-coding-agent`.
 
 ## Don'ts
 
