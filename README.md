@@ -41,18 +41,18 @@ Custom provider names are supported when the model id starts with `gpt-` and its
 
 The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Pi loads extensions from `~/.pi/agent/extensions/`, project `.pi/extensions/`, or via the `--extension` / `-e` CLI flag.
 
+This package is distributed from GitHub; the npm name is not published by this project.
+
 ```bash
-# 1. From npm (once published)
-pi install npm:@code-yeongyu/pi-apply-patch
-
-# 2. From git
+# 1. From git
 pi install git:github.com/code-yeongyu/pi-apply-patch
+senpi install git:github.com/code-yeongyu/pi-apply-patch
 
-# 3. Manual placement
+# 2. Manual placement
 git clone https://github.com/code-yeongyu/pi-apply-patch ~/.pi/agent/extensions/pi-apply-patch
 cd ~/.pi/agent/extensions/pi-apply-patch && npm install
 
-# 4. Dev / one-shot test
+# 3. Dev / one-shot test
 pi -e /path/to/pi-apply-patch/src/index.ts
 ```
 
