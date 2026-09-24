@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Docs: install from GitHub instead of npm.
+- CI: publish skips without a configured token.
+
 ## [0.1.3] - 2026-09-24
 
 First tagged release from this repository.
