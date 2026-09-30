@@ -1415,6 +1415,10 @@ export function createApplyPatchTool(): ApplyPatchToolDefinition {
 		label: "ApplyPatch",
 		description: APPLY_PATCH_FREEFORM_DESCRIPTION,
 		parameters: APPLY_PATCH_PARAMS,
+		// Pi's public grammar hook: models whose provider sets `compat.supportsOpenAIGrammarTools`
+		// receive apply_patch as a native OpenAI custom tool constrained by the Codex Lark grammar.
+		// Other providers fall back to the plain function tool.
+		constrainedSampling: { type: "grammar", variants: { openai_lark: APPLY_PATCH_LARK_GRAMMAR } },
 		prepareArguments: normalizeApplyPatchArguments,
 		promptSnippet: "Apply Codex-format file patches with apply_patch",
 		promptGuidelines: [
