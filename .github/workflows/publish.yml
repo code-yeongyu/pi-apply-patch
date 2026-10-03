@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
@@ -25,7 +24,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          registry-url: https://registry.npmjs.org
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -44,12 +42,24 @@ jobs:
       - name: Package smoke
         run: npm pack --dry-run
 
-      - name: Publish to npm
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NODE_AUTH_TOKEN is not configured; skipping npm publish."
-            exit 0
-          fi
-          npm publish --access public --provenance
+      - name: Release tag matches package version
+        if: github.event_name == 'release'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Release tag $TAG does not match package.json version $version (expected v$version)."
+            exit 1
+          fi
+
+      - name: Distribution
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          {
+            echo "## pi-apply-patch ${version}"
+            echo
+            echo "Distributed via git, not npm: the unscoped npm name belongs to another project."
+            echo "Install with \`pi install git:github.com/${GITHUB_REPOSITORY}\` (or \`senpi install\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "pi-apply-patch ${version} is distributed via git: pi install git:github.com/${GITHUB_REPOSITORY}"
