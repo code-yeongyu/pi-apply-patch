@@ -6,6 +6,7 @@
 
 - Recognize indented file headers like Codex, and reject any other line between file sections instead of silently dropping that section while reporting success (#45).
 - Preserve each line's ending on update: CRLF and mixed-ending files are no longer rewritten to LF, inserted lines take the file's line ending, and context lines keep their exact text (#47).
+- Declare the Codex Lark grammar through pi's `constrainedSampling` hook, so GPT models on providers with OpenAI grammar tools get `apply_patch` as a native grammar tool instead of a plain JSON function (#43, thanks @zidou-kiyn).
 
 ### Changed
 
