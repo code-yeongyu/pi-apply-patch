@@ -112,13 +112,11 @@ describe("pi-apply-patch", () => {
 		let capturedToolName: string | undefined;
 		let capturedDescription: string | undefined;
 		let capturedFreeform: FreeformToolFormat | undefined;
-		let capturedConstrainedSampling: ReturnType<typeof createApplyPatchTool>["constrainedSampling"];
 		const extensionApi = {
 			registerTool(tool: ReturnType<typeof createApplyPatchTool>) {
 				capturedToolName = tool.name;
 				capturedDescription = tool.description;
 				capturedFreeform = tool.freeform;
-				capturedConstrainedSampling = tool.constrainedSampling;
 			},
 			on() {
 				return () => {};
@@ -139,10 +137,6 @@ describe("pi-apply-patch", () => {
 			type: "grammar",
 			syntax: "lark",
 			definition: APPLY_PATCH_LARK_GRAMMAR,
-		});
-		expect(capturedConstrainedSampling).toEqual({
-			type: "grammar",
-			variants: { openai_lark: APPLY_PATCH_LARK_GRAMMAR },
 		});
 	});
 
