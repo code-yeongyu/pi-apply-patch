@@ -437,10 +437,35 @@ function seekSequence(
 	return undefined;
 }
 
+const FILE_HEADER_MARKERS = [
+	["add", "*** Add File: "],
+	["delete", "*** Delete File: "],
+	["update", "*** Update File: "],
+] as const;
+const MOVE_TO_MARKER = "*** Move to: ";
+
+// The parser and extractPatchedPaths both read headers through these two functions, so they share one
+// whitespace definition (String.prototype.trim): any path the parser writes is a path consumers that
+// gate writes per file (permission prompts) see, spelled the same way.
+function parseFileHeader(line: string): { kind: ParsedPatch["type"]; path: string } | undefined {
+	const trimmed = line.trim();
+	for (const [kind, marker] of FILE_HEADER_MARKERS) {
+		if (trimmed.startsWith(marker)) return { kind, path: trimmed.slice(marker.length) };
+	}
+	return undefined;
+}
+
+function parseMoveTo(line: string): string | undefined {
+	const trimmed = line.trimEnd();
+	return trimmed.startsWith(MOVE_TO_MARKER) ? trimmed.slice(MOVE_TO_MARKER.length) : undefined;
+}
+
 export function extractPatchedPaths(patchText: string): string[] {
-	const normalized = stripHeredoc(normalizePatchText(patchText));
-	const matches = normalized.matchAll(/^\*\*\* (?:(?:Add|Delete|Update) File|Move to): (.+)$/gm);
-	return Array.from(matches, (match) => match[1] ?? "");
+	const lines = stripHeredoc(normalizePatchText(patchText)).split("\n");
+	return lines.flatMap((line) => {
+		const path = parseFileHeader(line)?.path ?? parseMoveTo(line.trimStart());
+		return path === undefined ? [] : [path];
+	});
 }
 
 function createPatchDiff(oldContent: string, newContent: string): { diff: string; added: number; removed: number } {
@@ -924,19 +949,22 @@ function parsePatch(patchText: string): ParsedPatch[] {
 	const hunks: ParsedPatch[] = [];
 	let index = beginIndex + 1;
 	while (index < endIndex) {
-		const line = lines[index] ?? "";
-		if (!line.startsWith("*** ")) {
+		// Like Codex, file headers are recognized after trimming, and any other non-blank line between file
+		// sections is rejected below; skipping it would silently drop the section it introduces.
+		const line = (lines[index] ?? "").trim();
+		if (line === "") {
 			index++;
 			continue;
 		}
+		const header = parseFileHeader(line);
 
-		if (line.startsWith("*** Add File: ")) {
-			const filePath = line.slice("*** Add File: ".length);
+		if (header?.kind === "add") {
+			const filePath = header.path;
 			index++;
 			const contentLines: string[] = [];
 			while (index < endIndex) {
 				const nextLine = lines[index] ?? "";
-				if (nextLine.startsWith("*** ")) {
+				if (nextLine.trim().startsWith("*** ")) {
 					break;
 				}
 				if (!nextLine.startsWith("+")) {
@@ -953,18 +981,19 @@ function parsePatch(patchText: string): ParsedPatch[] {
 			continue;
 		}
 
-		if (line.startsWith("*** Delete File: ")) {
-			hunks.push({ type: "delete", filePath: line.slice("*** Delete File: ".length) });
+		if (header?.kind === "delete") {
+			hunks.push({ type: "delete", filePath: header.path });
 			index++;
 			continue;
 		}
 
-		if (line.startsWith("*** Update File: ")) {
-			const filePath = line.slice("*** Update File: ".length);
+		if (header?.kind === "update") {
+			const filePath = header.path;
 			index++;
 			let movePath: string | undefined;
-			if ((lines[index] ?? "").startsWith("*** Move to: ")) {
-				movePath = (lines[index] ?? "").slice("*** Move to: ".length);
+			const moveTo = parseMoveTo(lines[index] ?? "");
+			if (moveTo !== undefined) {
+				movePath = moveTo;
 				index++;
 			}
 

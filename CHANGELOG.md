@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Recognize indented file headers like Codex, and reject any other line between file sections instead of silently dropping that section while reporting success (#45).
+
 ### Changed
 
 - Docs: install from GitHub instead of npm.
