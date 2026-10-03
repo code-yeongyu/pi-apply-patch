@@ -924,8 +924,10 @@ function parsePatch(patchText: string): ParsedPatch[] {
 	const hunks: ParsedPatch[] = [];
 	let index = beginIndex + 1;
 	while (index < endIndex) {
-		const line = lines[index] ?? "";
-		if (!line.startsWith("*** ")) {
+		// Like Codex, file headers are recognized after trimming, and any other non-blank line between file
+		// sections is rejected below; skipping it would silently drop the section it introduces.
+		const line = (lines[index] ?? "").trim();
+		if (line === "") {
 			index++;
 			continue;
 		}
@@ -936,7 +938,7 @@ function parsePatch(patchText: string): ParsedPatch[] {
 			const contentLines: string[] = [];
 			while (index < endIndex) {
 				const nextLine = lines[index] ?? "";
-				if (nextLine.startsWith("*** ")) {
+				if (nextLine.trim().startsWith("*** ")) {
 					break;
 				}
 				if (!nextLine.startsWith("+")) {
