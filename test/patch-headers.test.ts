@@ -117,15 +117,23 @@ describe("apply_patch file headers", () => {
 		expect(await readFile(path.join(cwd, "notes.md"), "utf8")).toBe("intro\n *** Update File: x\nEND\n");
 	});
 
-	it("#given an indented header the parser accepts #when patched paths are listed #then that file is included", () => {
+	it("#given headers indented or padded with any whitespace #when applied #then the listed paths are exactly the files written", async () => {
 		// given
+		const cwd = await workspace({ "old.txt": "x\n", "b.txt": "b1\n", "c.txt": "c1\n" });
 		const patch =
-			"*** Begin Patch\n*** Delete File: old.txt\n  *** Update File: secrets.env  \n@@\n-a\n+b\n*** End Patch\n";
+			"*** Begin Patch\n*** Delete File: old.txt\n\u00A0*** Update File: b.txt\u00A0\n@@\n-b1\n+B1\n" +
+			"*** Update File: c.txt\u00A0\n*** Move to: moved.txt  \n@@\n-c1\n+C1\n*** End Patch\n";
 
 		// when
-		const paths = extractPatchedPaths(patch);
+		const listed = extractPatchedPaths(patch);
+		const result = await applyPatchDetailed(cwd, patch);
 
 		// then
-		expect(paths).toEqual(["old.txt", "secrets.env"]);
+		expect(result.failures).toEqual([]);
+		expect(listed).toEqual(["old.txt", "b.txt", "c.txt", "moved.txt"]);
+		expect(result.appliedFiles).toEqual(["old.txt", "b.txt", "moved.txt"]);
+		expect(await readFile(path.join(cwd, "b.txt"), "utf8")).toBe("B1\n");
+		expect(await readFile(path.join(cwd, "moved.txt"), "utf8")).toBe("C1\n");
+		expect(await exists(path.join(cwd, "c.txt"))).toBe(false);
 	});
 });
