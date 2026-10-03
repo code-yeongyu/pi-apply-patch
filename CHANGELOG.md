@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-03
+
 ### Fixed
 
 - Recognize indented file headers like Codex, and reject any other line between file sections instead of silently dropping that section while reporting success (#45).
