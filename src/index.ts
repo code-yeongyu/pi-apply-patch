@@ -439,7 +439,8 @@ function seekSequence(
 
 export function extractPatchedPaths(patchText: string): string[] {
 	const normalized = stripHeredoc(normalizePatchText(patchText));
-	const matches = normalized.matchAll(/^\*\*\* (?:(?:Add|Delete|Update) File|Move to): (.+)$/gm);
+	// Matches every header the parser accepts (it trims them), so a consumer gating writes per file sees them all.
+	const matches = normalized.matchAll(/^[ \t]*\*\*\* (?:(?:Add|Delete|Update) File|Move to): (.+?)[ \t]*$/gm);
 	return Array.from(matches, (match) => match[1] ?? "");
 }
 

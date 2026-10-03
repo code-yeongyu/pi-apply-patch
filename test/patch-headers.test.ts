@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyPatchDetailed, PatchParseError } from "../src/index.js";
+import { applyPatchDetailed, extractPatchedPaths, PatchParseError } from "../src/index.js";
 
 const tempDirectories: string[] = [];
 
@@ -115,5 +115,17 @@ describe("apply_patch file headers", () => {
 		// then
 		expect(result.failures).toEqual([]);
 		expect(await readFile(path.join(cwd, "notes.md"), "utf8")).toBe("intro\n *** Update File: x\nEND\n");
+	});
+
+	it("#given an indented header the parser accepts #when patched paths are listed #then that file is included", () => {
+		// given
+		const patch =
+			"*** Begin Patch\n*** Delete File: old.txt\n  *** Update File: secrets.env  \n@@\n-a\n+b\n*** End Patch\n";
+
+		// when
+		const paths = extractPatchedPaths(patch);
+
+		// then
+		expect(paths).toEqual(["old.txt", "secrets.env"]);
 	});
 });
