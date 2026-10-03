@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- CI: the publish workflow no longer has an npm publish step; the package is distributed via git. A release now fails when its tag does not match `package.json`.
+
 ## [0.1.4] - 2026-10-03
 
 ### Fixed
