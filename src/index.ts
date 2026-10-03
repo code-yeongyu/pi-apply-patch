@@ -13,6 +13,7 @@ import {
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import * as Diff from "diff";
 import { Type } from "typebox";
+import { type ContextLineIndex, type LineReplacement, replacementsAroundContext, SourceText } from "./line-endings.js";
 import { writeFileAtomic } from "./write-file-atomic.js";
 
 const APPLY_PATCH_PARAMS = Type.Object({
@@ -30,6 +31,7 @@ type PatchChunk = {
 	changeContexts: string[];
 	oldLines: string[];
 	newLines: string[];
+	contextLineIndices: ContextLineIndex[];
 	isEndOfFile: boolean;
 };
 
@@ -1030,6 +1032,7 @@ function parsePatch(patchText: string): ParsedPatch[] {
 
 				const oldLines: string[] = [];
 				const newLines: string[] = [];
+				const contextLineIndices: ContextLineIndex[] = [];
 				let isEndOfFile = false;
 				let parsedLines = 0;
 				while (index < endIndex) {
@@ -1048,9 +1051,11 @@ function parsePatch(patchText: string): ParsedPatch[] {
 					const prefix = hunkLine[0];
 					const value = hunkLine.slice(1);
 					if (prefix === undefined) {
+						contextLineIndices.push([oldLines.length, newLines.length]);
 						oldLines.push("");
 						newLines.push("");
 					} else if (prefix === " ") {
+						contextLineIndices.push([oldLines.length, newLines.length]);
 						oldLines.push(value);
 						newLines.push(value);
 					} else if (prefix === "-") {
@@ -1071,7 +1076,7 @@ function parsePatch(patchText: string): ParsedPatch[] {
 				if (parsedLines === 0) {
 					throw new PatchParseError("Update hunk does not contain any lines");
 				}
-				chunks.push({ changeContexts, oldLines, newLines, isEndOfFile });
+				chunks.push({ changeContexts, oldLines, newLines, contextLineIndices, isEndOfFile });
 			}
 			if (chunks.length === 0 && !movePath) {
 				throw new PatchParseError(`Update file hunk for path '${filePath}' is empty`);
@@ -1106,17 +1111,10 @@ function parseNonEmptyPatch(patchText: string): ParsedPatch[] {
 	throw new PatchParseError("apply_patch verification failed: no hunks found");
 }
 
-function splitFileLines(content: string): string[] {
-	const lines = normalizePatchText(content).split("\n");
-	if (lines[lines.length - 1] === "") {
-		lines.pop();
-	}
-	return lines;
-}
-
 function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
-	const originalLines = splitFileLines(content);
-	const replacements: { start: number; oldLength: number; newLines: string[] }[] = [];
+	const source = SourceText.parse(content);
+	const originalLines = source.texts;
+	const replacements: LineReplacement[] = [];
 	let lineIndex = 0;
 	let fuzz = 0;
 
@@ -1153,16 +1151,13 @@ function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]):
 		}
 
 		fuzz += foundAt.fuzz;
-		replacements.push({ start: foundAt.index, oldLength: pattern.length, newLines });
+		replacements.push(
+			...replacementsAroundContext(foundAt.index, pattern.length, newLines, chunk.contextLineIndices),
+		);
 		lineIndex = foundAt.index + pattern.length;
 	}
 
-	const nextLines = [...originalLines];
-	for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-		nextLines.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
-	}
-	nextLines.push("");
-	return { content: nextLines.join("\n"), fuzz };
+	return { content: source.replace(replacements), fuzz };
 }
 
 async function applySingleHunk(
