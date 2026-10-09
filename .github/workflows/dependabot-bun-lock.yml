@@ -2,7 +2,8 @@ name: dependabot bun.lock
 
 # Dependabot's npm updater rewrites package.json and package-lock.json but never bun.lock, so `bun install
 # --frozen-lockfile` in ci.yml fails on every npm bump before a test runs. This refreshes bun.lock on Dependabot's
-# branches and re-runs CI on the new commit (a commit pushed with GITHUB_TOKEN starts no workflow by itself).
+# branches. The commit's own pull_request CI run is held for approval (github-actions[bot] counts as a first-time
+# contributor), so the job approves it, or dispatches ci.yml if it cannot.
 
 on:
   push:
@@ -35,7 +36,7 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      # Pinned by SHA and run without dependency lifecycle scripts: this job holds a write token.
+      # No dependency lifecycle scripts: this job holds a write token.
       - name: Refresh bun.lock
         run: bun install --ignore-scripts
 
@@ -57,4 +58,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "build(deps): refresh bun.lock" -- bun.lock
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
-          gh workflow run ci.yml --ref "$BRANCH"
+          # The push creates this commit's pull_request CI run, held for approval because github-actions[bot] counts as a
+          # first-time contributor. Approving it attaches the required checks to the PR; if it cannot be found or approved,
+          # a dispatched run still checks the commit, though its checks do not show on the PR.
+          sha=$(git rev-parse HEAD)
+          run_id=""
+          for attempt in $(seq 1 12); do
+            run_id=$(gh run list --workflow ci.yml --commit "$sha" --event pull_request --json databaseId --jq '.[0].databaseId // empty' || true)
+            [ -n "$run_id" ] && break
+            [ "$attempt" -lt 12 ] && sleep 5
+          done
+          if [ -n "$run_id" ] && gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve"; then
+            echo "approved pull_request run ${run_id}"
+          else
+            echo "::warning::could not approve the pull_request run (id: ${run_id:-none}); dispatching ci.yml instead"
+            gh workflow run ci.yml --ref "$BRANCH"
+          fi
