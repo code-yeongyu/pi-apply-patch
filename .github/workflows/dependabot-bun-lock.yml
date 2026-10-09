@@ -1,0 +1,60 @@
+name: dependabot bun.lock
+
+# Dependabot's npm updater rewrites package.json and package-lock.json but never bun.lock, so `bun install
+# --frozen-lockfile` in ci.yml fails on every npm bump before a test runs. This refreshes bun.lock on Dependabot's
+# branches and re-runs CI on the new commit (a commit pushed with GITHUB_TOKEN starts no workflow by itself).
+
+on:
+  push:
+    branches: ["dependabot/npm_and_yarn/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: refresh bun.lock
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # Dependency lifecycle scripts never run here: this job holds a write token.
+      - name: Refresh bun.lock
+        run: bun install --ignore-scripts
+
+      - name: Commit and re-run CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if git diff --quiet -- bun.lock; then
+            echo "bun.lock is already current"
+            exit 0
+          fi
+          if [ -n "$(git status --porcelain -- . ':!bun.lock')" ]; then
+            git status --porcelain
+            echo "::error::bun install changed files other than bun.lock; not committing"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(deps): refresh bun.lock" -- bun.lock
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
+          gh workflow run ci.yml --ref "$BRANCH"
