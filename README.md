@@ -50,11 +50,16 @@ senpi install git:github.com/code-yeongyu/pi-apply-patch
 
 # 2. Manual placement
 git clone https://github.com/code-yeongyu/pi-apply-patch ~/.pi/agent/extensions/pi-apply-patch
-cd ~/.pi/agent/extensions/pi-apply-patch && npm install
+cd ~/.pi/agent/extensions/pi-apply-patch
+npm install --omit=dev --legacy-peer-deps
 
 # 3. Dev / one-shot test
 pi -e /path/to/pi-apply-patch/src/index.ts
 ```
+
+Pi supplies `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox` at runtime. These host modules are declared as optional peers with `*` ranges so npm does not install another copy of Pi. The extension installs only `diff` as a runtime dependency.
+
+0.87.1 is the oldest previously tested Pi host, not an enforced peer version constraint. The `*` ranges defer module provision to Pi; they do not guarantee compatibility with future breaking API changes.
 
 After installation, restart pi or run `/reload` inside an interactive session.
 
@@ -69,7 +74,7 @@ npm pack --dry-run
 pi -e ./src/index.ts
 ```
 
-Development and CI use Bun 1.4.2. `package-lock.json` is kept alongside `bun.lock` so `npm ci && npm test` keeps working for npm consumers.
+Development and CI use Bun 1.4.2 and pinned SDK development dependencies: the four `@earendil-works/pi-*` packages at 1.0.4 and `typebox` at 1.3.36. `package-lock.json` is kept alongside `bun.lock` so `npm ci && npm test` keeps working for npm consumers.
 
 The test suite uses vitest. TypeScript is strict, Node-only, and uses ESM imports with `.js` suffixes.
 
