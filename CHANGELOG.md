@@ -4,7 +4,8 @@
 
 ### Changed
 
-- Peer dependencies on `@earendil-works/pi-*` are `>=0.87.1` instead of `*`. 0.87.1 is the oldest pi the extension is verified against: typecheck and the full test suite pass with every `@earendil-works` package at 0.87.1.
+- Declare the four `@earendil-works/pi-*` host packages and `typebox` as `*` peer dependencies supplied by Pi. 0.87.1 is the oldest previously tested host, not an enforced peer version constraint.
+- Mark all host peers optional to prevent npm from automatically installing another copy of Pi. Move `typebox` from runtime dependencies to an exact 1.3.36 development dependency; `diff` is the sole runtime dependency.
 - CI: the Dependabot `bun.lock` refresh approves the CI run its own push starts, so the required checks attach to the pull request, and falls back to dispatching `ci.yml` if that run cannot be approved.
 - CI: the publish workflow no longer has an npm publish step; the package is distributed via git. A release now fails when its tag does not match `package.json`.
 
