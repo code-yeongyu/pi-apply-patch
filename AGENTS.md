@@ -12,7 +12,7 @@ Conventions for human contributors and AI agents working on this repository.
 
 ## Commands
 
-- `bun install` — install dependencies (Bun 1.4.2; `bun.lock` and `package-lock.json` are both committed).
+- `bun install` — install dependencies (Bun 1.4.4; `bun.lock` and `package-lock.json` are both committed).
 - `bun run test` — run vitest once.
 - `bun run typecheck` — strict TypeScript check.
 - `bun run check` — type check + biome.

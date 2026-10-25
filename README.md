@@ -69,7 +69,7 @@ npm pack --dry-run
 pi -e ./src/index.ts
 ```
 
-Development and CI use Bun 1.4.2. `package-lock.json` is kept alongside `bun.lock` so `npm ci && npm test` keeps working for npm consumers.
+Development and CI use Bun 1.4.4. `package-lock.json` is kept alongside `bun.lock` so `npm ci && npm test` keeps working for npm consumers.
 
 The test suite uses vitest. TypeScript is strict, Node-only, and uses ESM imports with `.js` suffixes.
 
